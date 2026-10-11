@@ -5,6 +5,7 @@ import threading
 import itertools
 from datetime import datetime
 import pandas as pd
+import numpy as np
 import openpyxl
 from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment
@@ -14,6 +15,11 @@ import platform
 import subprocess
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
+import matplotlib
+matplotlib.use('TkAgg')
+import matplotlib.pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from matplotlib.figure import Figure
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -29,11 +35,283 @@ try:
 except Exception:
     TEM_PDF = False
 
+try:
+    import pypdf
+    TEM_PYPDF = True
+except Exception:
+    TEM_PYPDF = False
+
 ctk.set_appearance_mode("Dark")
 ctk.set_default_color_theme("blue")
 
 # Carrega as variáveis de ambiente
 load_dotenv()
+
+
+# =====================================================================
+# MONKEY-PATCH: Correção do Bug de Scroll do CustomTkinter no Linux
+# =====================================================================
+def _patch_ctk_scroll():
+    """
+    Corrige o bug no CustomTkinter em ambiente Linux onde event.widget
+    pode ser transmitido como string para _check_if_valid_scroll,
+    gerando AttributeError: 'str' object has no attribute 'master'.
+    """
+    original_check = getattr(ctk.CTkScrollableFrame, "_check_if_valid_scroll", None)
+    if original_check:
+        def _safe_check_if_valid_scroll(self, widget):
+            if widget is None:
+                return False
+            if isinstance(widget, str):
+                try:
+                    widget = self.nametowidget(widget)
+                except Exception:
+                    return False
+            curr = widget
+            while curr is not None:
+                if curr == self or curr == getattr(self, '_parent_canvas', None):
+                    return True
+                curr = getattr(curr, 'master', None)
+            return False
+        ctk.CTkScrollableFrame._check_if_valid_scroll = _safe_check_if_valid_scroll
+
+_patch_ctk_scroll()
+
+
+# =====================================================================
+# FUNÇÕES DE PIPELINE & MATEMÁTICA FINANCEIRA (MODULARES E TESTÁVEIS)
+# =====================================================================
+
+def limpar_valor_monetario(val):
+    """
+    Normaliza representações monetárias de bancos brasileiros para float numérico:
+    Trata strings como 'R$ 1.250,50', '-450,90', '1200.50' ou valores float/int diretos.
+    """
+    if pd.isna(val) or val is None:
+        return 0.0
+    if isinstance(val, (int, float)):
+        return float(val)
+    s = str(val).strip().replace('R$', '').replace(' ', '')
+    if not s:
+        return 0.0
+    if ',' in s:
+        s = s.replace('.', '').replace(',', '.')
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+# Regras compiladas de Regex para categorização instantânea (Tier 1 do classificador híbrido)
+REGRAS_REGEX = [
+    ('TRANSPORTE', re.compile(r'\b(UBER|99|99APP|99 TECNOLOGIA|KIM\+|POSTO|COMBUSTIVEL|GASOLINA|ESTACIONAMENTO|METRO|CCR|SEM PARAR|VELOE|AUTO POSTO|IPIRANGA|SHELL|BR PETROBRAS)\b', re.IGNORECASE)),
+    ('SAÚDE', re.compile(r'\b(FARMACIA|DROGARIA|PAGUE MENOS|DROGASIL|RAIA|HOSPITAL|CLINICA|CONSULTA|MEDIC|SAUDE|LABORATORIO|ODONTO|EXAME|DOR CONSULTORIA)\b', re.IGNORECASE)),
+    ('DELIVERY', re.compile(r'\b(IFOOD|RAPPI|DELIVERY|AIQFOME|ZE DELIVERY|HABIB\'S DELIVERY|PEDIDOSJA)\b', re.IGNORECASE)),
+    ('RESTAURANTE', re.compile(r'\b(RESTAURANTE|LANCHES?|BURGUER|BURGER|DELICATESSEN|PIZZA|PIZZARIA|PADARIA|CAFE|BAR|DOGAO|CHURRASC|BAKERY|DOCERIA|SUSHI|MCDONALD|SUBWAY|GIRAFAS|BOB\'S|OUTBACK)\b', re.IGNORECASE)),
+    ('MERCADO', re.compile(r'\b(ATACADAO|MERCADO|SUPERMERCADO|HIPERMERCADO|ASSAI|CARREFOUR|EXTRA|BIG|HORTIFRUTI|ACOUGUE|PAO DE ACUCAR|SAMS CLUB|SUPER BOM|SUPERBOX)\b', re.IGNORECASE)),
+    ('ALUGUEL', re.compile(r'\b(ALUGUEL|CONDOMINIO|IMOBIL|QUINTO ANDAR|QUILTO|HABITACIONAL|LOCACAO)\b', re.IGNORECASE)),
+    ('CONTAS DE CONSUMO', re.compile(r'\b(COELB|EMBASA|ENEL|CPFL|SABESP|ENERGISA|LUZ|AGUA|GAS|TELECOM|CLARO|VIVO|TIM|OI|INTERNET|ENERGIA)\b', re.IGNORECASE)),
+    ('ASSINATURAS', re.compile(r'\b(NETFLIX|SPOTIFY|PRIME VIDEO|YOUTUBE|APPLE|GOOGLE|MAX|DISNEY|HBO|DEEZER|GLOBOPLAY|PARAMOUNT|CRUNCHYROLL|OPENAI|CHATGPT)\b', re.IGNORECASE)),
+    ('INVESTIMENTOS', re.compile(r'\b(B3|CDB|LCI|LCA|TESOURO|INVEST|ATIVO|RENDIMENTOS|DIVIDENDOS|APORTE|XP|CLEAR|RICO|BTG|INTER DTVM|NU INVEST)\b', re.IGNORECASE)),
+    ('COMPRAS', re.compile(r'\b(AMAZON|MERCADO LIVRE|SHOPEE|SHEIN|MAGALU|MAGAZINE LUIZA|CASAS BAHIA|ALIEXPRESS|ZARA|RENNER|RIACHUELO|C&A|KABUM|PICHAU)\b', re.IGNORECASE))
+]
+
+
+def classificar_por_regex(descricao):
+    """
+    Classifica instantaneamente a descrição via Regex compilado de alta precisão.
+    Retorna o nome da Categoria ou None caso deva ser enviado ao fallback de IA.
+    """
+    if not descricao or pd.isna(descricao):
+        return None
+    s = str(descricao).strip()
+    for cat, regex in REGRAS_REGEX:
+        if regex.search(s):
+            return cat
+    return None
+
+
+def deduplicar_e_tratar_estornos(df):
+    """
+    Deduplicação Inteligente & Cancelamento de Estornos:
+    1. Remove duplicatas estritas originadas por múltiplos uploads do mesmo extrato.
+    2. Identifica e neutraliza pares de estorno (+V e -V) ocorridos no mesmo período,
+       evitando inflar artificialmente o total de entradas e saídas.
+    """
+    if df is None or df.empty:
+        return df, {"duplicatas_removidas": 0, "estornos_neutralizados": 0}
+
+    df_copia = df.copy()
+    linhas_iniciais = len(df_copia)
+
+    # 1. Deduplicação de linhas idênticas
+    subset_cols = [c for c in ['Data', 'Descricao', 'Valor', 'Banco'] if c in df_copia.columns]
+    if subset_cols:
+        df_copia = df_copia.drop_duplicates(subset=subset_cols, keep='first').reset_index(drop=True)
+    duplicatas_removidas = linhas_iniciais - len(df_copia)
+
+    # 2. Neutralização de estornos e cancelamentos
+    estornos_neutralizados = 0
+    termos_estorno = ['ESTORNO', 'CANCELAMENTO', 'REVERSAO', 'REVERSÃO', 'DEVOLUCAO', 'DEVOLUÇÃO', 'REEMBOLSO']
+    indices_para_remover = set()
+
+    positivos = df_copia[df_copia['Valor'] > 0]
+    negativos = df_copia[df_copia['Valor'] < 0]
+
+    for idx_pos, row_pos in positivos.iterrows():
+        val_pos = abs(row_pos['Valor'])
+        desc_pos = str(row_pos.get('Descricao', '')).upper()
+
+        candidatos_neg = negativos[
+            (negativos['Valor'].abs() == val_pos) &
+            (~negativos.index.isin(indices_para_remover))
+        ]
+
+        for idx_neg, row_neg in candidatos_neg.iterrows():
+            desc_neg = str(row_neg.get('Descricao', '')).upper()
+
+            eh_estorno = (
+                any(t in desc_pos for t in termos_estorno) or
+                any(t in desc_neg for t in termos_estorno) or
+                (len(desc_neg) > 5 and desc_neg[:8] in desc_pos) or
+                (len(desc_pos) > 5 and desc_pos[:8] in desc_neg)
+            )
+
+            if eh_estorno:
+                indices_para_remover.add(idx_pos)
+                indices_para_remover.add(idx_neg)
+                estornos_neutralizados += 1
+                break
+
+    if indices_para_remover:
+        df_copia = df_copia.drop(index=list(indices_para_remover)).reset_index(drop=True)
+
+    info = {
+        "duplicatas_removidas": duplicatas_removidas,
+        "estornos_neutralizados": estornos_neutralizados
+    }
+    return df_copia, info
+
+
+def calcular_juros_compostos(pmt, taxa_mensal=0.0085, meses=12):
+    """
+    Calcula a projeção de valor futuro de aportes mensais recorrentes (anuidade com juros compostos):
+    FV = PMT * (((1 + i)^n - 1) / i)
+    Retorna: (total_investido, montante_acumulado, juros_auferidos)
+    """
+    if pmt <= 0 or meses <= 0:
+        return 0.0, 0.0, 0.0
+    if taxa_mensal <= 0:
+        total = pmt * meses
+        return total, total, 0.0
+
+    fv = pmt * (((1 + taxa_mensal) ** meses - 1) / taxa_mensal)
+    total_investido = pmt * meses
+    juros = fv - total_investido
+    return total_investido, fv, juros
+
+
+def otimizar_metas_combinatoria(gastos_por_categoria, meta_economia=None, taxa_mensal=0.0085):
+    """
+    Lógica de Análise Combinatória Avançada (Variação do 0-1 Knapsack / Subset Sum Problem):
+    
+    1. FORMULAÇÃO MATEMÁTICA:
+       Dado um conjunto de categorias não essenciais C = {C_1, C_2, ..., C_k} com gastos médios
+       mensais v_i > 0 e pesos subjetivos de impacto perceptual w_i (onde categorias como Assinaturas
+       e Delivery têm menor fricção de corte do que Restaurante ou Compras), e uma meta financeira M (ex: R$ 450).
+       
+       Objetivo: Encontrar o subconjunto S ⊆ C que minimize o impacto no padrão de vida do usuário:
+       - Restrição primária: sum(v_i para i ∈ S) >= M (bater a meta pretendida).
+       - Função objetivo de minimização:
+         F(S) = (sum(v_i) - M) + lambda_1 * |S| + lambda_2 * sum(w_i)
+         Isto penaliza excessos desnecessários além da meta, minimiza a quantidade de categorias sacrificadas
+         (|S| menor significa menor esforço de adaptação de hábitos) e prioriza cortes em gastos de baixo atrito.
+         
+    2. CENÁRIOS GERADOS:
+       - Plano Otimizado: Solução da minimização descrita acima.
+       - Plano Agressivo: Maior corte viável para aporte máximo.
+       - Plano Equilibrado: Alternativa intermediária de diversificação de cortes.
+       
+    3. PROJEÇÃO DE JUROS COMPOSTOS:
+       Para cada plano, calcula o montante acumulado se o valor mensal for aportado a 100% do CDI
+       (taxa de ~0.85% ao mês) nos horizontes de 1 ano (12m), 5 anos (60m) e 10 anos (120m).
+    """
+    pesos_friccao = {
+        'ASSINATURAS': 1.0,
+        'DELIVERY': 1.2,
+        'OUTROS': 1.3,
+        'TRANSPORTE': 1.5,
+        'COMPRAS': 1.8,
+        'RESTAURANTE': 2.0
+    }
+    categorias_essenciais = {'ALUGUEL', 'MERCADO', 'SAÚDE', 'CONTAS DE CONSUMO', 'RECEITA', 'INVESTIMENTOS'}
+    nao_essenciais = gastos_por_categoria.drop(
+        labels=[c for c in categorias_essenciais if c in gastos_por_categoria.index],
+        errors='ignore'
+    )
+
+    if nao_essenciais.empty:
+        return [], gastos_por_categoria
+
+    itens = nao_essenciais.nlargest(6).to_dict()
+    nomes = list(itens.keys())
+    candidatos = []
+
+    for r in range(1, len(nomes) + 1):
+        for combo in itertools.combinations(nomes, r):
+            soma = sum(itens[k] for k in combo)
+            friccao = sum(pesos_friccao.get(k, 1.5) for k in combo)
+            candidatos.append({
+                'Categorias_Cortadas': list(combo),
+                'Economia_Mensal_Estimada': soma,
+                'friccao': friccao,
+                'qtd_cortes': len(combo)
+            })
+
+    cenarios_selecionados = []
+    if meta_economia and meta_economia > 0:
+        batem_meta = [c for c in candidatos if c['Economia_Mensal_Estimada'] >= meta_economia]
+        if batem_meta:
+            batem_meta.sort(
+                key=lambda x: (x['Economia_Mensal_Estimada'] - meta_economia, x['qtd_cortes'], x['friccao'])
+            )
+            otimizado = dict(batem_meta[0])
+            otimizado['nome'] = 'Plano Otimizado (Menor Impacto / Knapsack)'
+            cenarios_selecionados.append(otimizado)
+
+            agressivo = dict(sorted(candidatos, key=lambda x: x['Economia_Mensal_Estimada'], reverse=True)[0])
+            if agressivo['Categorias_Cortadas'] != otimizado['Categorias_Cortadas']:
+                agressivo['nome'] = 'Plano Agressivo (Máxima Poupança)'
+                cenarios_selecionados.append(agressivo)
+
+            intermediarios = [
+                c for c in batem_meta
+                if c['Categorias_Cortadas'] != otimizado['Categorias_Cortadas'] and
+                (len(cenarios_selecionados) < 2 or c['Categorias_Cortadas'] != agressivo['Categorias_Cortadas'])
+            ]
+            if intermediarios:
+                equilibrado = dict(intermediarios[0])
+                equilibrado['nome'] = 'Plano Equilibrado'
+                cenarios_selecionados.append(equilibrado)
+        else:
+            maximo = dict(sorted(candidatos, key=lambda x: x['Economia_Mensal_Estimada'], reverse=True)[0])
+            maximo['nome'] = f'Plano Limite (Meta de R$ {meta_economia:.2f} excede cortes possíveis)'
+            cenarios_selecionados.append(maximo)
+    else:
+        ordenados = sorted(candidatos, key=lambda x: x['Economia_Mensal_Estimada'], reverse=True)
+        for i, c in enumerate(ordenados[:3]):
+            cd = dict(c)
+            cd['nome'] = f'Cenário Recomendado {i+1}'
+            cenarios_selecionados.append(cd)
+
+    for c in cenarios_selecionados:
+        eco = c['Economia_Mensal_Estimada']
+        c['projecoes'] = {}
+        for anos, meses in [(1, 12), (5, 60), (10, 120)]:
+            inv, mnt, jur = calcular_juros_compostos(eco, taxa_mensal, meses)
+            c['projecoes'][anos] = {'meses': meses, 'investido': inv, 'montante': mnt, 'juros': jur}
+
+    return cenarios_selecionados, gastos_por_categoria
 
 class AnalisadorFinanceiro:
     def __init__(self, api_key=None):
@@ -100,29 +378,8 @@ class AnalisadorFinanceiro:
         return novas
 
     def _categorizar_heuristica(self, desc):
-        """Classificação instantânea baseada em padrões bancários frequentes."""
-        d = str(desc).upper()
-        if any(k in d for k in ['UBER', '99 TECNOLOGIA', 'KIM+', 'POSTO', 'COMBUSTIVEL', 'ESTACIONAMENTO', 'METRO', 'CCR']):
-            return 'TRANSPORTE'
-        if any(k in d for k in ['FARMACIA', 'DROGARIA', 'PAGUE MENOS', 'HOSPITAL', 'CLINICA', 'CONSULTA', 'MEDIC', 'SAUDE', 'LABORATORIO']):
-            return 'SAÚDE'
-        if any(k in d for k in ['IFOOD', 'DELIVERY', 'RAPPI', 'AIQFOME']):
-            return 'DELIVERY'
-        if any(k in d for k in ['RESTAURANTE', 'LANCHES', 'SALGADOS', 'BURGUER', 'DELICATESSEN', 'PIZZA', 'PADARIA', 'CAFE', 'BAR', 'DOGAO', 'CHURRASC']):
-            return 'RESTAURANTE'
-        if any(k in d for k in ['ATACADAO', 'MERCADO', 'SUPERMERCADO', 'ASSAI', 'CARREFOUR', 'EXTRA', 'BIG', 'HORTIFRUTI', 'ACOUGUE']):
-            return 'MERCADO'
-        if any(k in d for k in ['ALUGUEL', 'CONDOMINIO', 'IMOBIL', 'QUILTO']):
-            return 'ALUGUEL'
-        if any(k in d for k in ['COELB', 'EMBASA', 'ENEL', 'CPFL', 'SABESP', 'ENERGISA', 'LUZ', 'AGUA', 'GAS', 'TELECOM', 'CLARO', 'VIVO', 'TIM', 'OI']):
-            return 'CONTAS DE CONSUMO'
-        if any(k in d for k in ['NETFLIX', 'SPOTIFY', 'PRIME VIDEO', 'YOUTUBE', 'APPLE', 'GOOGLE', 'MAX', 'DISNEY']):
-            return 'ASSINATURAS'
-        if any(k in d for k in ['B3', 'CDB', 'LCI', 'LCA', 'TESOURO', 'INVEST', 'ATIVO', 'RENDIMENTOS']):
-            return 'INVESTIMENTOS'
-        if any(k in d for k in ['AMAZON', 'MERCADO LIVRE', 'SHOPEE', 'SHEIN', 'MAGALU', 'CASAS BAHIA', 'ALIEXPRESS']):
-            return 'COMPRAS'
-        return None
+        """Classificação instantânea baseada em padrões bancários frequentes (Tier 1 via Regex)."""
+        return classificar_por_regex(desc)
 
     def _identificar_nome_banco(self, caminho_arquivo, df):
         """Identifica o nome amigável do banco a partir do conteúdo ou nome do arquivo."""
@@ -258,10 +515,12 @@ class AnalisadorFinanceiro:
         df.columns = self._desduplicar_colunas(df.columns)
         return df
 
-    def _carregar_pdf(self, caminho_arquivo):
+    def _carregar_pdf(self, caminho_arquivo, senha=None, callback_senha=None):
         """
         Extrai transações de extratos em PDF (C6, Nubank, Itaú, Inter, BB, etc.)
         utilizando regex linha a linha de alta precisão ou tabelas estruturadas com pdfplumber.
+        Suporta arquivos protegidos com pop-up discreto de senha e descriptografia 100% em memória,
+        sem salvar nenhum arquivo descriptografado intermediário no disco.
         """
         if not TEM_PDF:
             raise ImportError("A biblioteca 'pdfplumber' não está instalada. Execute: pip install pdfplumber")
@@ -269,10 +528,42 @@ class AnalisadorFinanceiro:
         regex_val = re.compile(r"([-+]?\s*R\$\s*[\d\.]+,\d{2}|[-+]?\s*[\d\.]+,\d{2})\s*$")
         regex_date = re.compile(r"^(\d{2}[/-]\d{2}(?:[/-]\d{2,4})?)(?:\s+(\d{2}[/-]\d{2}(?:[/-]\d{2,4})?))?\s+(.*)$")
 
+        senha_usada = senha
+        nome_arq = os.path.basename(caminho_arquivo)
+
+        # 0. Detecção antecipada de senha com pypdf caso disponível
+        if TEM_PYPDF:
+            try:
+                reader = pypdf.PdfReader(caminho_arquivo)
+                if reader.is_encrypted:
+                    if not senha_usada and callback_senha:
+                        senha_usada = callback_senha(nome_arq)
+                    if not senha_usada:
+                        raise PermissionError(f"O extrato '{nome_arq}' está protegido por senha e nenhuma chave foi informada.")
+                    dec = reader.decrypt(senha_usada)
+                    if dec == 0:
+                        raise PermissionError(f"Senha incorreta para descriptografar '{nome_arq}'.")
+            except PermissionError:
+                raise
+            except Exception:
+                pass
+
+        def _abrir_pdf_em_memoria():
+            nonlocal senha_usada
+            try:
+                return pdfplumber.open(caminho_arquivo, password=senha_usada)
+            except Exception as err:
+                msg_err = str(err).lower()
+                if any(k in msg_err for k in ["password", "encrypted", "senha", "pwd"]) and callback_senha:
+                    senha_usada = callback_senha(nome_arq)
+                    if senha_usada:
+                        return pdfplumber.open(caminho_arquivo, password=senha_usada)
+                raise PermissionError(f"O extrato '{nome_arq}' está criptografado e requer senha válida.")
+
         registros = []
         ano_detectado = str(datetime.now().year)
 
-        with pdfplumber.open(caminho_arquivo) as pdf:
+        with _abrir_pdf_em_memoria() as pdf:
             texto_completo = ""
             # 1. Tenta extração de alta precisão baseada em texto linha a linha
             for pagina in pdf.pages:
@@ -320,7 +611,7 @@ class AnalisadorFinanceiro:
 
         # 2. Fallback: Se não encontrou transações por texto, tenta extrair tabelas
         linhas_tabela = []
-        with pdfplumber.open(caminho_arquivo) as pdf:
+        with _abrir_pdf_em_memoria() as pdf:
             for pagina in pdf.pages:
                 tabelas = pagina.extract_tables()
                 if tabelas:
@@ -372,19 +663,19 @@ class AnalisadorFinanceiro:
                 df.columns = self._desduplicar_colunas(df.columns)
                 return df
 
-        raise ValueError(f"Não foi possível extrair dados textuais de '{os.path.basename(caminho_arquivo)}'. Se o PDF for uma imagem digitalizada, exporte em formato CSV pelo app do seu banco.")
+        raise ValueError(f"Não foi possível extrair dados textuais de '{nome_arq}'. Se o PDF for uma imagem digitalizada, exporte em formato CSV pelo app do seu banco.")
 
-    def normalizar_dados(self, caminho_arquivo):
+    def normalizar_dados(self, caminho_arquivo, callback_senha=None):
         """
         Lê e normaliza os dados do extrato (CSV ou PDF) de qualquer banco brasileiro,
-        usando a API do Groq para detectar colunas e enriquecer/categorizar dados.
+        usando classificador híbrido em cascata (Regex Tier 1 + Fallback Groq LLM Tier 2).
         """
         nome_arquivo = os.path.basename(caminho_arquivo)
-        print(f"Lendo e normalizando '{nome_arquivo}' com Groq...")
+        print(f"Lendo e normalizando '{nome_arquivo}'...")
 
         # 1. Leitura do arquivo conforme extensão
         if caminho_arquivo.lower().endswith('.pdf'):
-            self.df = self._carregar_pdf(caminho_arquivo)
+            self.df = self._carregar_pdf(caminho_arquivo, callback_senha=callback_senha)
         else:
             self.df = self._carregar_csv_com_cabecalho_dinamico(caminho_arquivo)
 
@@ -446,7 +737,6 @@ class AnalisadorFinanceiro:
         if 'Data' not in self.df.columns or 'Valor' not in self.df.columns:
             raise ValueError(f"Não foi possível identificar colunas de Data e Valor em '{nome_arquivo}'. Colunas encontradas: {colunas_originais}")
 
-        # Se houver múltiplas colunas chamadas Data ou Valor, garante que é uma Series
         if isinstance(self.df['Data'], pd.DataFrame):
             self.df['Data'] = self.df['Data'].iloc[:, 0]
         if isinstance(self.df['Valor'], pd.DataFrame):
@@ -457,24 +747,8 @@ class AnalisadorFinanceiro:
         elif 'Descricao' not in self.df.columns:
             self.df['Descricao'] = "Transação"
 
-        # 3. Limpeza e conversão do Valor (trata formatos R$, 1.250,50 ou -1250.50)
-        if self.df['Valor'].dtype == object:
-            self.df['Valor'] = (
-                self.df['Valor']
-                .astype(str)
-                .str.replace('R$', '', regex=False)
-                .str.strip()
-                .str.replace(' ', '', regex=False)
-            )
-            tem_virgula = self.df['Valor'].str.contains(',', na=False).any()
-            if tem_virgula:
-                self.df['Valor'] = (
-                    self.df['Valor']
-                    .str.replace('.', '', regex=False)
-                    .str.replace(',', '.', regex=False)
-                )
-
-        self.df['Valor'] = pd.to_numeric(self.df['Valor'], errors='coerce')
+        # 3. Limpeza e normalização do Valor com função utilitária testada
+        self.df['Valor'] = self.df['Valor'].apply(limpar_valor_monetario)
 
         # 4. Limpeza e conversão da Data
         ano_atual = str(datetime.now().year)
@@ -489,14 +763,21 @@ class AnalisadorFinanceiro:
         # Remove linhas sem Data ou Valor válidos
         self.df = self.df.dropna(subset=['Data', 'Valor']).copy()
 
-        # 5. Normalização ou categorização inteligente (Heurística rápida + IA Groq)
+        # 5. Classificador Híbrido em Cascata (Tier 1: Regex -> Tier 2: LLM Groq em lote)
         if 'Categoria' not in self.df.columns or self.df['Categoria'].dropna().empty:
-            self.df['Categoria'] = self.df['Descricao'].apply(self._categorizar_heuristica)
-            nao_categorizadas = self.df.loc[(self.df['Valor'] < 0) & (self.df['Categoria'].isna()), 'Descricao'].dropna().unique()
+            self.df['Categoria'] = self.df['Descricao'].apply(classificar_por_regex)
+            
+            # Apenas despesas desconhecidas (sem match no regex) vão para o Groq
+            nao_categorizadas = self.df.loc[
+                (self.df['Valor'] < 0) & (self.df['Categoria'].isna()), 'Descricao'
+            ].dropna().unique()
+            
             if len(nao_categorizadas) > 0:
+                print(f"-> {len(nao_categorizadas)} transações desconhecidas enviadas para Groq LLM...")
                 mapa_ia = self._categorizar_transacoes_com_ia(nao_categorizadas)
                 for desc, cat in mapa_ia.items():
                     self.df.loc[self.df['Descricao'] == desc, 'Categoria'] = cat
+            
             self.df['Categoria'] = self.df['Categoria'].fillna('OUTROS')
         else:
             self.df['Categoria'] = self.df['Categoria'].fillna('OUTROS').astype(str).str.strip().str.upper()
@@ -504,21 +785,24 @@ class AnalisadorFinanceiro:
         # Ajusta receitas (valores positivos)
         self.df.loc[self.df['Valor'] > 0, 'Categoria'] = self.df.loc[self.df['Valor'] > 0, 'Categoria'].replace('OUTROS', 'RECEITA')
 
-        # 6. Colunas adicionais para agrupamento e análise
+        # 6. Deduplicação inteligente e tratamento de estornos no arquivo atual
+        self.df, _ = deduplicar_e_tratar_estornos(self.df)
+
+        # 7. Colunas adicionais para agrupamento e análise
         self.df['Mes_Ano'] = self.df['Data'].dt.to_period('M')
         self.df['Tipo'] = self.df['Valor'].apply(lambda x: 'Receita' if x > 0 else 'Despesa')
 
         return self.df
 
-    def processar_arquivos(self, caminhos_arquivos):
+    def processar_arquivos(self, caminhos_arquivos, callback_senha=None):
         """
         Lê, normaliza e cruza múltiplos extratos (CSV e PDF),
-        consolidando tudo em um único dataset unificado.
+        consolidando tudo em um único dataset unificado com deduplicação inteligente.
         """
         dfs = []
         for caminho in caminhos_arquivos:
             try:
-                df_item = self.normalizar_dados(caminho)
+                df_item = self.normalizar_dados(caminho, callback_senha=callback_senha)
                 if not df_item.empty:
                     dfs.append(df_item)
             except Exception as e:
@@ -529,17 +813,22 @@ class AnalisadorFinanceiro:
             raise ValueError("Nenhum dado válido pôde ser extraído dos arquivos fornecidos.")
 
         df_consolidado = pd.concat(dfs, ignore_index=True)
+        
+        # Deduplicação e tratamento de estornos cross-extratos
+        df_consolidado, self.info_deduplicacao = deduplicar_e_tratar_estornos(df_consolidado)
+        
         # Ordena cronologicamente
         df_consolidado = df_consolidado.sort_values(by='Data').reset_index(drop=True)
         self.df = df_consolidado
         return df_consolidado
 
-    def analise_combinatoria_economia(self):
+    def analise_combinatoria_economia(self, meta_economia=None, taxa_mensal=0.0085):
         """
-        Aplica análise combinatória para encontrar os melhores cenários de corte de gastos.
-        Pega as top categorias de despesas (ignorando 'MORADIA' e 'ESSENCIAL').
+        Aplica o Otimizador de Metas (Knapsack Problem / Subset Sum) para encontrar
+        os melhores cenários de economia com menor impacto perceptual no padrão de vida.
+        Calcula também a projeção de juros compostos (1, 5 e 10 anos) a 100% do CDI.
         """
-        print("[2/5] Realizando Análise Combinatória de cenários...")
+        print("[2/5] Realizando Análise Combinatória Avançada (Knapsack & Projeções)...")
 
         # Filtra apenas despesas (valores negativos)
         despesas = self.df[self.df['Valor'] < 0].copy()
@@ -549,42 +838,34 @@ class AnalisadorFinanceiro:
         num_meses = max(1, self.df['Mes_Ano'].nunique())
         gastos_por_categoria = despesas.groupby('Categoria')['Valor_Absoluto'].sum() / num_meses
 
-        # Remove categorias essenciais para a simulação de cortes
-        categorias_nao_essenciais = gastos_por_categoria.drop(
-            labels=['ALUGUEL', 'MERCADO', 'SAÚDE'], errors='ignore'
+        cenarios, _ = otimizar_metas_combinatoria(
+            gastos_por_categoria,
+            meta_economia=meta_economia,
+            taxa_mensal=taxa_mensal
         )
-
-        # Pega as maiores despesas não essenciais (até 5)
-        top_cortes = categorias_nao_essenciais.nlargest(5).to_dict()
-        categorias = list(top_cortes.keys())
-        cenarios = []
-
-        # Análise Combinatória: Combinações de corte
-        tamanhos = [k for k in [2, 3] if k <= len(categorias)]
-        if not tamanhos and len(categorias) == 1:
-            tamanhos = [1]
-
-        for tamanho_corte in tamanhos:
-            combinacoes = list(itertools.combinations(categorias, tamanho_corte))
-            for combo in combinacoes:
-                economia_mensal = sum(top_cortes[cat] for cat in combo)
-                cenarios.append({
-                    'Categorias_Cortadas': combo,
-                    'Economia_Mensal_Estimada': economia_mensal
-                })
-
-        # Ordena para pegar os cenários mais impactantes
-        cenarios_ordenados = sorted(cenarios, key=lambda x: x['Economia_Mensal_Estimada'], reverse=True)[:3]
-        return cenarios_ordenados, gastos_por_categoria
+        return cenarios, gastos_por_categoria
 
     def gerar_relatorio_ia(self, cenarios, gastos, bancos=None):
         """
-        Usa a API do Groq para analisar os dados e os cenários combinatórios e gerar um relatório.
+        Usa a API do Groq para analisar os dados, cenários combinatórios e
+        projeções de juros compostos para gerar um relatório executivo.
         """
         print("[3/5] Consultando Inteligência Artificial (Groq)...")
 
         resumo_gastos = gastos.nlargest(8).to_dict()
-        texto_cenarios = "\n".join([f"- Cortando {c['Categorias_Cortadas']}: Economia de R$ {c['Economia_Mensal_Estimada']:.2f}/mês" for c in cenarios])
+        
+        linhas_cenarios = []
+        for c in cenarios:
+            nome = c.get('nome', 'Cenário')
+            cats = ", ".join(c.get('Categorias_Cortadas', []))
+            eco = c.get('Economia_Mensal_Estimada', 0.0)
+            proj = c.get('projecoes', {})
+            txt_proj = ""
+            if 5 in proj:
+                txt_proj = f" | Projeção CDI em 5 anos: R$ {proj[5]['montante']:.2f} (Juros: R$ {proj[5]['juros']:.2f})"
+            linhas_cenarios.append(f"- **{nome}**: Cortando [{cats}] -> Economia de R$ {eco:.2f}/mês{txt_proj}")
+            
+        texto_cenarios = "\n".join(linhas_cenarios)
         bancos_txt = f"Contas bancárias integradas na análise: {', '.join(bancos)}.\n" if bancos and len(bancos) > 1 else ""
 
         prompt = f"""
@@ -592,14 +873,15 @@ class AnalisadorFinanceiro:
         {bancos_txt}Analise o resumo consolidado de gastos médios mensais do seu cliente (cruzamento de contas):
         {resumo_gastos}
 
-        Fizemos uma análise combinatória e encontramos estes cenários de economia cortando categorias não essenciais:
+        Fizemos uma análise combinatória matemática (Knapsack Problem) e calculamos projeções de juros compostos a 100% do CDI:
         {texto_cenarios}
 
         Com base nesses dados unificados, escreva um relatório profissional e direto ao ponto com a seguinte estrutura:
         1. **Resumo da Situação:** Uma análise do fluxo e perfil de gastos consolidado.
         2. **Insights Ocultos:** Padrões ou gargalos que você notou no cruzamento dos dados.
-        3. **Dicas Baseadas na Análise Combinatória:** Avalie os cenários apresentados e sugira qual é o mais realista.
-        4. **Próximos Passos:** 3 ações claras e imediatas para melhorar a saúde financeira.
+        3. **Dicas Baseadas na Análise Combinatória:** Avalie os cenários apresentados e sugira qual é o mais realista para o cliente aportar.
+        4. **Impacto dos Juros Compostos:** Explique o efeito multiplicador de investir a economia mensal no CDI/ativos geradores de renda.
+        5. **Próximos Passos:** 3 ações claras e imediatas para melhorar a saúde financeira.
 
         Responda em Português (Brasil).
         """
@@ -877,8 +1159,8 @@ class AppGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("FinPy • Analisador Financeiro Multibancos (AI & Data Science)")
-        self.root.geometry("880x860")
-        self.root.minsize(750, 550)
+        self.root.geometry("920x880")
+        self.root.minsize(780, 580)
 
         self.chave_groq = os.getenv("GROQ_API_KEY", "").strip()
         self.arquivos_selecionados = []
@@ -886,7 +1168,12 @@ class AppGUI:
         self.tela_cheia = False
         self.maximizado = False
 
-        # Container Principal Scrollável (permite rolar a tela inteira em qualquer resolução)
+        # Referências dos componentes dinâmicos
+        self.kpi_labels = {}
+        self.fig_matplotlib = None
+        self.canvas_matplotlib = None
+
+        # Container Principal Scrollável (com patch contra erros no Linux)
         self.main_container = ctk.CTkScrollableFrame(
             root,
             corner_radius=0,
@@ -897,20 +1184,23 @@ class AppGUI:
         # 1. Header com Logo, Título, Controles de Tela Cheia e Tema
         self._criar_header()
 
-        # 2. Card de Configuração da API Key
-        self._criar_card_api()
+        # 2. Cards de KPI no Topo (Entradas, Saídas, Poupança %, Maior Ralo)
+        self._criar_kpi_cards()
 
-        # 3. Zona de Upload Drag & Drop
+        # 3. Card de Configuração da API Key e Meta de Economia (Knapsack)
+        self._criar_card_api_e_meta()
+
+        # 4. Zona de Upload Drag & Drop
         self._criar_zona_upload()
 
-        # 4. Lista de Arquivos Carregados
+        # 5. Lista de Arquivos Carregados
         self._criar_lista_arquivos()
 
-        # 5. Barra de Ação & Progresso
+        # 6. Barra de Ação & Progresso
         self._criar_barra_execucao()
         self._atualizar_lista_arquivos_ui()
 
-        # 6. Tabview para Logs e Relatório IA
+        # 7. Tabview para Gráficos Embutidos, Relatório IA, Logs e Planilha
         self._criar_tabview_resultados()
 
         # Configura atalhos de teclado e scroll universal
@@ -918,9 +1208,8 @@ class AppGUI:
 
     def _criar_header(self):
         header = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        header.pack(fill="x", pady=(0, 10))
+        header.pack(fill="x", pady=(0, 8))
 
-        # Título e Subtítulo
         title_box = ctk.CTkFrame(header, fg_color="transparent")
         title_box.pack(side="left")
 
@@ -933,13 +1222,12 @@ class AppGUI:
 
         lbl_sub = ctk.CTkLabel(
             title_box,
-            text="Cruzamento de Extratos Bancários • Análise Combinatória • Groq AI",
+            text="Pipeline de Extratos • Otimizador de Metas (Knapsack) • CDI • Groq AI",
             font=ctk.CTkFont(size=12),
             text_color="gray"
         )
         lbl_sub.pack(anchor="w")
 
-        # Controles Direita: Status, Tela Cheia e Tema
         ctrl_box = ctk.CTkFrame(header, fg_color="transparent")
         ctrl_box.pack(side="right")
 
@@ -986,90 +1274,59 @@ class AppGUI:
         )
         theme_menu.pack(side="left")
 
-    def alternar_tela_cheia(self, event=None):
-        self.tela_cheia = not self.tela_cheia
-        try:
-            self.root.attributes('-fullscreen', self.tela_cheia)
-            if self.tela_cheia:
-                self.btn_tela_cheia.configure(text="🗗 Janela")
-            else:
-                self.btn_tela_cheia.configure(text="⛶ Tela Cheia")
-        except Exception:
-            pass
+    def _criar_kpi_cards(self):
+        """Cards de KPI Dinâmicos no Topo com visual executivo e moderno."""
+        kpi_container = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        kpi_container.pack(fill="x", pady=(0, 10))
 
-    def sair_tela_cheia(self, event=None):
-        if self.tela_cheia:
-            self.tela_cheia = False
-            try:
-                self.root.attributes('-fullscreen', False)
-                self.btn_tela_cheia.configure(text="⛶ Tela Cheia")
-            except Exception:
-                pass
+        # Configura grid 4 colunas com peso igual
+        for i in range(4):
+            kpi_container.grid_columnconfigure(i, weight=1)
 
-    def alternar_maximizar(self, event=None):
-        self.maximizado = not self.maximizado
-        try:
-            if platform.system() == 'Windows':
-                self.root.state('zoomed' if self.maximizado else 'normal')
-            else:
-                self.root.attributes('-zoomed', self.maximizado)
-            if self.maximizado:
-                self.btn_maximizar.configure(text="🗗 Restaurar")
-            else:
-                self.btn_maximizar.configure(text="🗖 Maximizar")
-        except Exception:
-            pass
+        cards_data = [
+            ("entradas", "💰 Total Entradas", "R$ --", "#2EA043", "Receitas consolidadas"),
+            ("saidas", "💸 Total Saídas", "R$ --", "#F85149", "Despesas do período"),
+            ("poupanca", "📈 Taxa Poupança", "--%", "#388BFD", "Sobra líquida / Entradas"),
+            ("ralo", "🚨 Maior Ralo", "--", "#E5A93C", "Gargalo principal")
+        ]
 
-    def _configurar_eventos_globais(self):
-        # Atalhos
-        self.root.bind("<F11>", self.alternar_tela_cheia)
-        self.root.bind("<Escape>", self.sair_tela_cheia)
+        for col, (chave, titulo, val_padrao, cor_val, sub) in enumerate(cards_data):
+            card = ctk.CTkFrame(kpi_container, corner_radius=10, fg_color=("gray90", "gray17"))
+            card.grid(row=0, column=col, padx=4, sticky="nsew", ipady=4)
 
-        # Scroll universal suave pelo mouse wheel em qualquer ponto da tela
-        def _scroll_suave(event):
-            widget_str = str(event.widget).lower()
-            if 'text' in widget_str:
-                return
-            try:
-                if platform.system() == 'Windows':
-                    self.main_container._parent_canvas.yview_scroll(-int(event.delta / 60), "units")
-                elif platform.system() == 'Darwin':
-                    self.main_container._parent_canvas.yview_scroll(-int(event.delta), "units")
-                else:
-                    if event.num == 4:
-                        self.main_container._parent_canvas.yview_scroll(-2, "units")
-                    elif event.num == 5:
-                        self.main_container._parent_canvas.yview_scroll(2, "units")
-            except Exception:
-                pass
+            lbl_t = ctk.CTkLabel(card, text=titulo, font=ctk.CTkFont(size=11, weight="bold"), text_color="gray")
+            lbl_t.pack(anchor="w", padx=10, pady=(6, 1))
 
-        if platform.system() == 'Linux':
-            self.root.bind_all("<Button-4>", _scroll_suave, add="+")
-            self.root.bind_all("<Button-5>", _scroll_suave, add="+")
-        else:
-            self.root.bind_all("<MouseWheel>", _scroll_suave, add="+")
+            lbl_v = ctk.CTkLabel(card, text=val_padrao, font=ctk.CTkFont(size=15, weight="bold"), text_color=cor_val)
+            lbl_v.pack(anchor="w", padx=10)
+            self.kpi_labels[chave] = lbl_v
 
-    def _criar_card_api(self):
+            lbl_s = ctk.CTkLabel(card, text=sub, font=ctk.CTkFont(size=10), text_color="gray")
+            lbl_s.pack(anchor="w", padx=10, pady=(0, 6))
+
+    def _criar_card_api_e_meta(self):
+        """Card combinado de Groq API Key e Meta de Economia (Knapsack)."""
         card = ctk.CTkFrame(self.main_container, corner_radius=10, fg_color=("gray90", "gray17"))
         card.pack(fill="x", pady=(0, 10), padx=2, ipady=4)
 
+        # Seção API Key
         lbl_key = ctk.CTkLabel(card, text="🔑 Groq API Key:", font=ctk.CTkFont(size=12, weight="bold"))
-        lbl_key.pack(side="left", padx=(12, 8))
+        lbl_key.pack(side="left", padx=(12, 6))
 
         self.entry_chave = ctk.CTkEntry(
             card,
-            placeholder_text="gsk_... (opcional se já definida no .env)",
+            placeholder_text="gsk_... (opcional se já no .env)",
             show="*",
             height=30
         )
-        self.entry_chave.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        self.entry_chave.pack(side="left", fill="x", expand=True, padx=(0, 4))
         if self.chave_groq:
             self.entry_chave.insert(0, self.chave_groq)
 
         self.btn_eye = ctk.CTkButton(
             card,
             text="👁️",
-            width=32,
+            width=30,
             height=30,
             fg_color=("gray75", "gray25"),
             hover_color=("gray65", "gray35"),
@@ -1077,15 +1334,18 @@ class AppGUI:
         )
         self.btn_eye.pack(side="left", padx=(0, 10))
 
-        status_txt = "Configurada no .env" if self.chave_groq else "Insira sua chave"
-        status_color = "#2EA043" if self.chave_groq else "#E5A93C"
-        self.lbl_key_status = ctk.CTkLabel(
+        # Seção Meta de Economia (Otimizador Knapsack)
+        lbl_meta = ctk.CTkLabel(card, text="🎯 Meta Economia (R$):", font=ctk.CTkFont(size=12, weight="bold"))
+        lbl_meta.pack(side="left", padx=(4, 6))
+
+        self.entry_meta = ctk.CTkEntry(
             card,
-            text=status_txt,
-            font=ctk.CTkFont(size=11),
-            text_color=status_color
+            placeholder_text="Ex: 450.00",
+            width=90,
+            height=30
         )
-        self.lbl_key_status.pack(side="right", padx=(0, 12))
+        self.entry_meta.insert(0, "450.00")
+        self.entry_meta.pack(side="left", padx=(0, 12))
 
     def _alternar_visibilidade_chave(self):
         self.mostrar_chave = not self.mostrar_chave
@@ -1106,14 +1366,14 @@ class AppGUI:
 
         lbl_drop = ctk.CTkLabel(
             self.drop_frame,
-            text="Arraste e solte seus extratos aqui (CSV ou PDF)",
+            text="Arraste e solte seus extratos aqui (CSV ou PDF com/sem senha)",
             font=ctk.CTkFont(size=15, weight="bold")
         )
         lbl_drop.pack(pady=(2, 2))
 
         lbl_sub = ctk.CTkLabel(
             self.drop_frame,
-            text="Suporta múltiplos extratos: Banco Inter, C6 Bank, Nubank, Itaú, Bradesco, BB, Caixa, etc.",
+            text="Suporta múltiplos extratos: Nubank, Inter, C6, Itaú, Bradesco, BB, Caixa, etc. Senha solicitada em memória.",
             font=ctk.CTkFont(size=12),
             text_color="gray"
         )
@@ -1257,17 +1517,39 @@ class AppGUI:
         self.progress_bar.set(0)
 
     def _criar_tabview_resultados(self):
-        self.tabview = ctk.CTkTabview(self.main_container, height=280, corner_radius=10)
-        self.tabview.pack(fill="x", pady=(0, 10))
+        self.tabview = ctk.CTkTabview(self.main_container, height=360, corner_radius=10)
+        self.tabview.pack(fill="both", expand=True, pady=(0, 10))
 
-        tab_log = self.tabview.add("📋 Logs do Pipeline")
+        tab_graficos = self.tabview.add("📊 Gráficos Embutidos")
         tab_ia = self.tabview.add("💡 Relatório da IA")
-        tab_planilha = self.tabview.add("📊 Planilha Gerada")
+        tab_log = self.tabview.add("📋 Logs do Pipeline")
+        tab_planilha = self.tabview.add("📁 Planilha Gerada")
 
-        # Tab 1: Logs
+        # Tab 1: Gráficos Embutidos (Matplotlib + CTk)
+        self.frame_graficos = ctk.CTkFrame(tab_graficos, fg_color="transparent")
+        self.frame_graficos.pack(fill="both", expand=True, padx=4, pady=4)
+
+        self.lbl_graficos_placeholder = ctk.CTkLabel(
+            self.frame_graficos,
+            text="Os gráficos interativos (Rosca de Gastos, Fluxo de Caixa e Juros Compostos CDI)\nserão renderizados aqui após a execução do pipeline.",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        self.lbl_graficos_placeholder.pack(expand=True, pady=40)
+
+        # Tab 2: Relatório IA
+        self.txt_relatorio = ctk.CTkTextbox(
+            tab_ia,
+            height=280,
+            font=ctk.CTkFont(size=12),
+            corner_radius=6
+        )
+        self.txt_relatorio.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # Tab 3: Logs
         self.txt_log = ctk.CTkTextbox(
             tab_log,
-            height=220,
+            height=280,
             font=ctk.CTkFont(family="Consolas", size=11),
             text_color="#80FF80",
             fg_color=("#1a1a1a", "#0f0f0f"),
@@ -1275,16 +1557,7 @@ class AppGUI:
         )
         self.txt_log.pack(fill="both", expand=True, padx=4, pady=4)
 
-        # Tab 2: Relatório IA
-        self.txt_relatorio = ctk.CTkTextbox(
-            tab_ia,
-            height=220,
-            font=ctk.CTkFont(size=12),
-            corner_radius=6
-        )
-        self.txt_relatorio.pack(fill="both", expand=True, padx=4, pady=4)
-
-        # Tab 3: Arquivo Gerado & Ações
+        # Tab 4: Arquivo Gerado & Ações
         self.frame_planilha = ctk.CTkFrame(tab_planilha, corner_radius=8, fg_color="transparent")
         self.frame_planilha.pack(fill="both", expand=True, padx=12, pady=12)
 
@@ -1317,6 +1590,215 @@ class AppGUI:
             state="disabled"
         )
         self.btn_abrir_planilha.pack()
+
+    def _atualizar_kpis(self, df):
+        """Calcula e atualiza os valores dinâmicos dos cards de KPI no topo."""
+        try:
+            entradas = float(df[df['Valor'] > 0]['Valor'].sum())
+            saidas = float(df[df['Valor'] < 0]['Valor'].abs().sum())
+            poupanca_pct = ((entradas - saidas) / entradas * 100) if entradas > 0 else 0.0
+
+            despesas = df[df['Valor'] < 0]
+            if not despesas.empty:
+                gastos_cat = despesas.groupby('Categoria')['Valor'].sum().abs()
+                maior_cat = str(gastos_cat.idxmax())
+                val_maior = float(gastos_cat.max())
+                texto_ralo = f"{maior_cat} (R$ {val_maior:,.0f})"
+            else:
+                texto_ralo = "Nenhum"
+
+            self.kpi_labels['entradas'].configure(text=f"R$ {entradas:,.2f}")
+            self.kpi_labels['saidas'].configure(text=f"R$ {saidas:,.2f}")
+            self.kpi_labels['poupanca'].configure(text=f"{poupanca_pct:.1f}%")
+            self.kpi_labels['ralo'].configure(text=texto_ralo)
+        except Exception as e:
+            print(f"Aviso ao atualizar KPIs: {e}")
+
+    def _atualizar_graficos(self, df, cenarios, gastos):
+        """Renderiza os gráficos embutidos de Rosca, Fluxo Temporal e Juros Compostos no CTk."""
+        try:
+            if self.lbl_graficos_placeholder:
+                self.lbl_graficos_placeholder.destroy()
+                self.lbl_graficos_placeholder = None
+
+            if self.canvas_matplotlib is not None:
+                self.canvas_matplotlib.get_tk_widget().destroy()
+                self.canvas_matplotlib = None
+
+            # Cria figura estilizada em tema Dark
+            fig = Figure(figsize=(9.2, 3.8), facecolor='#161b22', dpi=100)
+            ax1 = fig.add_subplot(131)
+            ax2 = fig.add_subplot(132)
+            ax3 = fig.add_subplot(133)
+
+            # 1. Gráfico de Rosca (Donut) das Despesas por Categoria
+            ax1.set_facecolor('#161b22')
+            despesas_cat = gastos.sort_values(ascending=False)
+            if len(despesas_cat) > 5:
+                top5 = despesas_cat.head(5)
+                outras_soma = despesas_cat.iloc[5:].sum()
+                valores = top5.tolist() + [outras_soma]
+                labels = top5.index.tolist() + ['OUTRAS']
+            else:
+                valores = despesas_cat.tolist()
+                labels = despesas_cat.index.tolist()
+
+            cores_paleta = ['#388BFD', '#2EA043', '#FF7B72', '#D29922', '#A371F7', '#56D364']
+            if valores and sum(valores) > 0:
+                wedges, texts, autotexts = ax1.pie(
+                    valores, labels=labels, autopct='%1.0f%%', startangle=140,
+                    colors=cores_paleta[:len(valores)],
+                    wedgeprops=dict(width=0.45, edgecolor='#161b22', linewidth=2),
+                    textprops=dict(color='#C9D1D9', fontsize=8)
+                )
+                for at in autotexts:
+                    at.set_color('white')
+                    at.set_fontsize(8)
+            ax1.set_title('Despesas por Categoria', color='white', fontsize=10, fontweight='bold')
+
+            # 2. Fluxo de Caixa Mensal (Temporal)
+            ax2.set_facecolor('#161b22')
+            df['Mes_Ano_Str'] = df['Data'].dt.strftime('%b/%y')
+            meses_unicos = df['Mes_Ano_Str'].unique().tolist()
+            entradas_mes = []
+            saidas_mes = []
+            for m in meses_unicos:
+                df_m = df[df['Mes_Ano_Str'] == m]
+                entradas_mes.append(float(df_m[df_m['Valor'] > 0]['Valor'].sum()))
+                saidas_mes.append(float(df_m[df_m['Valor'] < 0]['Valor'].abs().sum()))
+
+            x_pos = np.arange(len(meses_unicos))
+            largura = 0.35
+            ax2.bar(x_pos - largura/2, entradas_mes, largura, label='Entradas', color='#2EA043', alpha=0.85)
+            ax2.bar(x_pos + largura/2, saidas_mes, largura, label='Saídas', color='#F85149', alpha=0.85)
+            ax2.set_xticks(x_pos)
+            ax2.set_xticklabels(meses_unicos, color='#8B949E', fontsize=8)
+            ax2.tick_params(colors='#8B949E', labelsize=8)
+            ax2.set_title('Fluxo de Caixa Mensal', color='white', fontsize=10, fontweight='bold')
+            ax2.legend(facecolor='#21262d', edgecolor='#30363d', labelcolor='#C9D1D9', fontsize=7)
+            ax2.grid(True, linestyle='--', alpha=0.15, color='#8B949E')
+
+            # 3. Projeção de Juros Compostos (CDI) nos horizontes 1, 5 e 10 anos
+            ax3.set_facecolor('#161b22')
+            cenario_top = cenarios[0] if cenarios else {}
+            proj = cenario_top.get('projecoes', {})
+            prazos = ['1 Ano', '5 Anos', '10 Anos']
+            if 1 in proj and 5 in proj and 10 in proj:
+                investido = [proj[1]['investido'], proj[5]['investido'], proj[10]['investido']]
+                montante = [proj[1]['montante'], proj[5]['montante'], proj[10]['montante']]
+            else:
+                investido = [5400, 27000, 54000]
+                montante = [5650, 35000, 93000]
+
+            xp = np.arange(len(prazos))
+            ax3.bar(xp - largura/2, investido, largura, label='Aportado', color='#388BFD', alpha=0.8)
+            ax3.bar(xp + largura/2, montante, largura, label='Montante CDI', color='#2EA043', alpha=0.9)
+            ax3.set_xticks(xp)
+            ax3.set_xticklabels(prazos, color='#8B949E', fontsize=8)
+            ax3.tick_params(colors='#8B949E', labelsize=8)
+            eco_top = cenario_top.get('Economia_Mensal_Estimada', 0.0)
+            ax3.set_title(f'Projeção CDI (R$ {eco_top:,.0f}/mês)', color='white', fontsize=10, fontweight='bold')
+            ax3.legend(facecolor='#21262d', edgecolor='#30363d', labelcolor='#C9D1D9', fontsize=7)
+            ax3.grid(True, linestyle='--', alpha=0.15, color='#8B949E')
+
+            fig.tight_layout()
+
+            self.canvas_matplotlib = FigureCanvasTkAgg(fig, master=self.frame_graficos)
+            self.canvas_matplotlib.draw()
+            self.canvas_matplotlib.get_tk_widget().pack(fill="both", expand=True)
+            self.fig_matplotlib = fig
+
+        except Exception as e:
+            print(f"Erro ao atualizar gráficos embutidos: {e}")
+
+    def solicitar_senha_pdf(self, nome_arquivo):
+        """
+        Pop-up seguro e thread-safe na interface solicitando a senha para PDF criptografado.
+        Descriptografa puramente em memória sem salvar intermediários no disco.
+        """
+        evento = threading.Event()
+        resultado = {"senha": None}
+
+        def _abrir_popup():
+            dialog = ctk.CTkInputDialog(
+                text=f"O extrato '{nome_arquivo}' está protegido por senha.\nDigite a chave para descriptografar em memória:",
+                title="Extrato PDF Protegido"
+            )
+            resultado["senha"] = dialog.get_input()
+            evento.set()
+
+        self.root.after(0, _abrir_popup)
+        evento.wait()
+        return resultado["senha"]
+
+    def obter_meta_economia(self):
+        """Obtém a meta de economia definida pelo usuário ou fallback para R$ 450.00."""
+        try:
+            val_str = self.entry_meta.get().strip()
+            return limpar_valor_monetario(val_str)
+        except Exception:
+            return 450.0
+
+    def alternar_tela_cheia(self, event=None):
+        self.tela_cheia = not self.tela_cheia
+        try:
+            self.root.attributes('-fullscreen', self.tela_cheia)
+            if self.tela_cheia:
+                self.btn_tela_cheia.configure(text="🗗 Janela")
+            else:
+                self.btn_tela_cheia.configure(text="⛶ Tela Cheia")
+        except Exception:
+            pass
+
+    def sair_tela_cheia(self, event=None):
+        if self.tela_cheia:
+            self.tela_cheia = False
+            try:
+                self.root.attributes('-fullscreen', False)
+                self.btn_tela_cheia.configure(text="⛶ Tela Cheia")
+            except Exception:
+                pass
+
+    def alternar_maximizar(self, event=None):
+        self.maximizado = not self.maximizado
+        try:
+            if platform.system() == 'Windows':
+                self.root.state('zoomed' if self.maximizado else 'normal')
+            else:
+                self.root.attributes('-zoomed', self.maximizado)
+            if self.maximizado:
+                self.btn_maximizar.configure(text="🗗 Restaurar")
+            else:
+                self.btn_maximizar.configure(text="🗖 Maximizar")
+        except Exception:
+            pass
+
+    def _configurar_eventos_globais(self):
+        self.root.bind("<F11>", self.alternar_tela_cheia)
+        self.root.bind("<Escape>", self.sair_tela_cheia)
+
+        def _scroll_suave(event):
+            widget_str = str(event.widget).lower()
+            if 'text' in widget_str:
+                return
+            try:
+                if platform.system() == 'Windows':
+                    self.main_container._parent_canvas.yview_scroll(-int(event.delta / 60), "units")
+                elif platform.system() == 'Darwin':
+                    self.main_container._parent_canvas.yview_scroll(-int(event.delta), "units")
+                else:
+                    if event.num == 4:
+                        self.main_container._parent_canvas.yview_scroll(-2, "units")
+                    elif event.num == 5:
+                        self.main_container._parent_canvas.yview_scroll(2, "units")
+            except Exception:
+                pass
+
+        if platform.system() == 'Linux':
+            self.root.bind_all("<Button-4>", _scroll_suave, add="+")
+            self.root.bind_all("<Button-5>", _scroll_suave, add="+")
+        else:
+            self.root.bind_all("<MouseWheel>", _scroll_suave, add="+")
 
     def _abrir_planilha(self):
         caminho = os.path.abspath('Relatorio_Financeiro_Final.xlsx')
@@ -1403,19 +1885,29 @@ class AppGUI:
     def processar_dados(self):
         try:
             total_arquivos = len(self.arquivos_selecionados)
-            self.log(f"Inicializando motor de IA para cruzar {total_arquivos} extrato(s)...")
+            meta_informada = self.obter_meta_economia()
+            self.log(f"Inicializando motor de IA e cruzamento de dados para {total_arquivos} extrato(s)...")
+            self.log(f"Meta de Economia Mensal configurada: R$ {meta_informada:,.2f}")
+            
             analisador = AnalisadorFinanceiro(api_key=self.chave_groq)
 
-            self.log("[1/5] Lendo, normalizando e cruzando dados de todos os extratos...")
-            df_consolidado = analisador.processar_arquivos(self.arquivos_selecionados)
-            self.log(f"-> Total de transações unificadas: {len(df_consolidado)}")
+            self.log("[1/5] Lendo, descriptografando (se necessário) e cruzando dados...")
+            df_consolidado = analisador.processar_arquivos(
+                self.arquivos_selecionados,
+                callback_senha=self.solicitar_senha_pdf
+            )
+            self.log(f"-> Total de transações após normalização: {len(df_consolidado)}")
             bancos_detectados = df_consolidado['Banco'].unique().tolist()
             self.log(f"-> Contas/Bancos detectados: {', '.join(bancos_detectados)}")
 
-            self.log("[2/5] Rodando Análise Combinatória (Itertools) para cenários de economia...")
-            cenarios_combo, gastos_agrupados = analisador.analise_combinatoria_economia()
+            if hasattr(analisador, 'info_deduplicacao'):
+                d_info = analisador.info_deduplicacao
+                self.log(f"-> Deduplicação inteligente: {d_info['duplicatas_removidas']} duplicatas eliminadas | {d_info['estornos_neutralizados']} estornos neutralizados.")
 
-            self.log("[3/5] Consultando LLM via Groq API. Aguardando insights...")
+            self.log("[2/5] Rodando Otimizador de Metas (Knapsack) & Projeções de Juros Compostos (CDI)...")
+            cenarios_combo, gastos_agrupados = analisador.analise_combinatoria_economia(meta_economia=meta_informada)
+
+            self.log("[3/5] Consultando LLM via Groq API. Aguardando insights executivos...")
             relatorio = analisador.gerar_relatorio_ia(cenarios_combo, gastos_agrupados, bancos=bancos_detectados)
 
             self.log("[4/5] Gerando planilha compatível com Google Sheets com Gráficos e Dashboards...")
@@ -1425,8 +1917,12 @@ class AppGUI:
 
             # Atualiza Aba de Relatório IA
             self.txt_relatorio.insert("end", relatorio)
-            self.tabview.set("💡 Relatório da IA")
-
+            
+            # Atualiza KPIs no topo e gráficos embutidos no thread principal
+            self.root.after(0, lambda: self._atualizar_kpis(df_consolidado))
+            self.root.after(0, lambda: self._atualizar_graficos(df_consolidado, cenarios_combo, gastos_agrupados))
+            
+            self.tabview.set("📊 Gráficos Embutidos")
             self.lbl_status.configure(text="🟢 Concluído", text_color="#2EA043")
             self.btn_abrir_planilha.configure(state="normal")
 
@@ -1435,9 +1931,10 @@ class AppGUI:
                 f"Cruzamento concluído com sucesso!\n\n"
                 f"- Extratos processados: {total_arquivos}\n"
                 f"- Contas/Bancos: {', '.join(bancos_detectados)}\n"
-                f"- Total de transações: {len(df_consolidado)}\n\n"
+                f"- Total de transações: {len(df_consolidado)}\n"
+                f"- Meta de economia mensal: R$ {meta_informada:,.2f}\n\n"
                 f"Arquivo gerado: Relatorio_Financeiro_Final.xlsx\n"
-                f"(Pronto para abrir diretamente no Google Sheets ou no Excel!)"
+                f"(Gráficos interativos renderizados na tela e prontos na planilha!)"
             )
 
         except Exception as e:

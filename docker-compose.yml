@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  test:
+    build: .
+    container_name: finpy-test
+    command: pytest tests/ -v
+    volumes:
+      - .:/app
+    environment:
+      - PYTHONUNBUFFERED=1
+
+  app:
+    build: .
+    container_name: finpy-app
+    command: python analisador_financeiro.py
+    volumes:
+      - .:/app
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+    environment:
+      - DISPLAY=${DISPLAY:-:0}
+      - PYTHONUNBUFFERED=1
+    network_mode: host

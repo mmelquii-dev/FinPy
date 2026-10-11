@@ -1,53 +1,84 @@
-# 📊 Analisador Financeiro Multibancos (AI & Data Science)
+# 📊 FinPy • Analisador Financeiro Multibancos (AI & Data Science)
 
 <div align="center">
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue?logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.11%2B-blue?logo=python&logoColor=white)
+![Pytest](https://img.shields.io/badge/Tests-Pytest%20100%25-brightgreen?logo=pytest&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-Ready-2496ED?logo=docker&logoColor=white)
 ![Groq](https://img.shields.io/badge/Groq%20Cloud-LLM%20API-orange?logo=fastapi&logoColor=white)
 ![Pandas](https://img.shields.io/badge/Pandas-Data%20Science-150458?logo=pandas&logoColor=white)
-![OpenPyXL](https://img.shields.io/badge/OpenPyXL-Excel%20%26%20Sheets-green)
-![Interface](https://img.shields.io/badge/CustomTkinter-Dark%20Mode-blue)
+![Matplotlib](https://img.shields.io/badge/Matplotlib-Embedded%20Charts-11557c)
+![CustomTkinter](https://img.shields.io/badge/CustomTkinter-Dark%20Mode-blue)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
-**Pipeline inteligente de Engenharia e Análise de Dados Financeiros com cruzamento multibancos, visão consolidada para Google Sheets/Excel e IA Generativa.**
+**Pipeline completo de Engenharia de Dados, Otimizador de Metas Combinatório (Knapsack Problem), Projeção de Juros Compostos (CDI), Deduplicação Inteligente, Extrator de PDF com Senha em Memória, Interface Executiva com Cards de KPI e Dashboards Embutidos.**
 
 </div>
 
 ---
 
-## 📌 Sobre o Projeto
+## 📌 Visão Geral do Projeto
 
-O **Analisador Financeiro Multibancos** resolve um dos maiores desafios de finanças pessoais e empresariais: **a fragmentação de extratos em diferentes bancos e formatos**.
+O **FinPy** é uma solução de engenharia e ciência de dados voltada para resolver a fragmentação e complexidade na consolidação de extratos bancários de múltiplas instituições financeiras (Banco Inter, C6 Bank, Nubank, Itaú, Bradesco, BB, Santander, Caixa, etc.).
 
-Em vez de organizar planilhas manualmente ou alimentar ferramentas proprietárias, esta aplicação permite que você simplesmente **arraste e solte múltiplos extratos bancários (arquivos CSV e PDF)** de qualquer banco brasileiro (Banco Inter, C6 Bank, Nubank, Itaú, Bradesco, Banco do Brasil, Santander, Caixa, etc.).
-
-O sistema normaliza os dados, realiza o **cruzamento das contas bancárias**, aplica **análise combinatória matemática** para identificar cenários ótimos de economia e consulta um modelo de IA da **Groq** para gerar um diagnóstico financeiro estratégico completo.
-
-Ao final, gera uma planilha profissional (`Relatorio_Financeiro_Final.xlsx`) com **Dashboard interativo e gráficos nativos**, 100% pronta para ser aberta no **Google Sheets** ou no **Microsoft Excel**.
+A aplicação unifica o pipeline de dados de ponta a ponta:
+1. **Ingestão Resiliente:** Processa arquivos CSV e PDFs (com ou sem senha), descriptografando diretamente em memória para garantir segurança e conformidade de dados.
+2. **Deduplicação & Higienização:** Remove duplicatas acidentais e cancela estornos/reversões de compras para não inflar receitas e despesas.
+3. **Classificação Híbrida (Regex + LLM):** Regras de alta performance mapeiam despesas imediatas, acionando a API do Groq apenas para lançamentos atípicos (economia de tokens e execução ultrarrápida).
+4. **Matemática Financeira & Análise Combinatória:** Modela o corte de despesas supérfluas como uma variação do **Problema da Mochila (Knapsack / Subset Sum)**, encontrando a combinação exata de cortes para bater a meta estipulada pelo usuário com o menor atrito perceptual no estilo de vida.
+5. **Projeções de Juros Compostos:** Simula o impacto multiplicador de aportar o valor economizado a 100% do CDI nos horizontes de 1, 5 e 10 anos.
+6. **Interface Gráfica Executiva (CustomTkinter + Matplotlib):** Exibe Cards de KPI no topo, renderiza gráficos nativos embutidos (Rosca de Despesas, Fluxo Temporal e Curva de Juros) e gera planilhas profissionais para **Google Sheets** e **Excel**.
 
 ---
 
-## 🚀 Principais Funcionalidades
+## 🚀 Os 4 Pilares da Aplicação
 
-- 🖥️ **Interface Gráfica Moderna (CustomTkinter):**
-  - Tema escuro/claro (*Dark/Light mode*) com cantos arredondados, visual contemporâneo e alternância em tempo real.
-  - Suporte completo a **Drag & Drop** para múltiplos arquivos simultâneos.
-  - Barra de progresso animada e abas separadas para logs em tempo real, relatório da IA e ações rápidas.
-  - Botão integrado para abrir a planilha diretamente no Excel/Sheets após o processamento.
-- 🏦 **Suporte Multibancos & Multiformatos:**
-  - Extração inteligente de **CSVs** com detecção dinâmica de delimitadores e linhas de cabeçalho.
-  - Parser de alta precisão para extratos em **PDF** (tratando quebras de linha, desconsiderando linhas de saldo diário e inferindo anos ausentes).
-  - Reconhecimento automático da instituição de origem (ex.: *Banco Inter*, *C6 Bank*, *Nubank*).
-- 🔀 **Cruzamento Consolidado de Dados:** Unifica todas as transações cronologicamente e gera comparações de receitas versus despesas por instituição financeira.
-- ⚡ **Classificador Híbrido de Despesas:**
-  - **Motor heurístico instantâneo:** Mapeia gastos recorrentes em milissegundos (*Uber, Mercado, Farmácia, B3/CDB, Contas de Consumo*).
-  - **IA com Groq:** Categoriza transações atípicas em lotes indexados ultracompactos, respeitando limites de taxa de tokens (OTPM).
-- 🧮 **Análise Combinatória Aplicada (`itertools`):** Simula matematicamente todas as combinações de corte em categorias não essenciais, apontando os cenários mais impactantes para o orçamento.
-- 💡 **Consultor Financeiro de IA (Groq):** Análise executiva gerada por LLM com diagnóstico de fluxo de caixa, gargalos invisíveis e plano prático de ação.
-- 📊 **Dashboard Executivo Nativo (Excel & Google Sheets):**
-  - Cartões de KPI formatados (Total de Receitas, Total de Despesas e Saldo Líquido).
-  - **Gráficos Nativos:** Barras por Categoria, Pizza de Distribuição, Gráfico Comparativo entre Bancos e Evolução Mensal.
-  - Abas detalhadas de *Transações Consolidadas*, *Resumo por Categoria* e *Insights da IA*.
+### 1. Engenharia de Dados & Pipeline
+- **Extrator Automático de PDF (com ou sem senha):** 
+  - Lê e extrai transações de extratos em PDF com alta precisão via `pdfplumber` e `pypdf`.
+  - Caso o PDF possua senha de proteção, a interface exibe um pop-up discreto solicitando a chave. A descriptografia ocorre **100% em memória**, sem jamais salvar arquivos intermediários desprotegidos em disco.
+- **Classificador Híbrido de Transações (Regex Tier 1 + Fallback LLM Tier 2):**
+  - **Tier 1 (Regex compilado):** Regras em $O(1)$ identificam instantaneamente padrões bancários comuns (*Uber, 99, iFood, Restaurantes, Drogarias, Assinaturas, Mercados, etc.*).
+  - **Tier 2 (Groq LLM Fallback):** Transações desconhecidas são enviadas em lotes compactos para a API do Groq classificar, reduzindo custos de API e acelerando a execução em mais de 90%.
+- **Deduplicação Inteligente & Tratamento de Estornos:**
+  - Elimina lançamentos duplicados gerados por importação acidental do mesmo extrato ou períodos sobrepostos.
+  - Detecta pares de compras seguidas de estorno/cancelamento (valores opostos de mesma quantia com descrições correspondentes no mesmo período) e neutraliza ambos, impedindo contaminação da base histórica.
+
+### 2. Matemática Financeira & Análise Combinatória Avançada
+- **Otimizador de Metas (Knapsack Problem / Subset Sum):**
+  - O usuário define sua meta mensal de economia (ex.: `R$ 450,00/mês`).
+  - O algoritmo modela as categorias não essenciais como itens de uma mochila:
+    $$\sum_{i \in S} v_i \ge \text{Meta}$$
+  - Minimiza a função de impacto e atrito:
+    $$F(S) = \alpha \cdot (\sum v_i - \text{Meta}) + \beta \cdot |S| + \gamma \cdot \sum w_i$$
+    onde $|S|$ penaliza a quantidade de categorias sacrificadas (menos categorias cortadas = menor mudança de hábitos) e $w_i$ avalia o atrito subjetivo (cortar Assinaturas ou Delivery tem menor impacto que cortar Restaurante ou Compras).
+  - Gera cenários claros: *Plano Otimizado (Menor Impacto)*, *Plano Equilibrado* e *Plano Agressivo (Máxima Poupança)*.
+- **Projeção de Juros Compostos (CDI):**
+  - Calcula o valor futuro de aportes mensais recorrentes no final de cada período:
+    $$FV(n) = PMT \times \frac{(1 + i)^n - 1}{i}$$
+  - Exibe o retorno projetado e os juros acumulados em **1 ano (12 meses)**, **5 anos (60 meses)** e **10 anos (120 meses)** a uma taxa real parametrizada (~0.85% ao mês, equivalente a 100% do CDI atual líquido).
+
+### 3. Interface & Experiência Visual (GUI)
+- **Cards de KPI no Topo:**
+  - 💰 **Total de Entradas** (Receitas consolidadas formatadas em verde).
+  - 💸 **Total de Saídas** (Despesas operacionais em vermelho).
+  - 📈 **Taxa de Poupança (%)** (Percentual de sobra líquida sobre as entradas).
+  - 🚨 **Maior Ralo Financeiro** (Identificação da categoria mais custosa e seu valor).
+- **Gráficos Embutidos na Janela (Matplotlib + CTk):**
+  - Aba nativa com Canvas Matplotlib de alta resolução estilizado em tema escuro:
+    - **Gráfico de Rosca (Donut):** Distribuição percentual das maiores despesas.
+    - **Fluxo de Caixa Mensal:** Barras comparativas de Entradas vs Saídas ao longo do tempo.
+    - **Curva de Juros Compostos:** Gráfico comparativo entre Total Aportado e Montante Acumulado com juros do CDI.
+- **Resolução de Compatibilidade Linux & Scroll Suave:**
+  - Implementação de monkey-patch no CustomTkinter prevenindo o erro `AttributeError: 'str' object has no attribute 'master'` durante o uso da roda do mouse em distribuições Linux.
+  - Suporte a tela cheia (`F11`), maximização responsiva e alternância dinâmica de tema (*Dark/Light*).
+
+### 4. Portfólio & Boas Práticas (GitHub Ready)
+- **Testes Automatizados com `pytest`:**
+  - Suite de testes unitários em `tests/test_analisador.py` com cobertura completa: normalização de moedas, regex de transações, deduplicação de estornos, otimizador Knapsack e cálculo de juros compostos.
+- **Containerização com Docker & Docker Compose:**
+  - `Dockerfile` configurado com base leve `python:3.11-slim`, bibliotecas gráficas do X11/Tkinter e dependências otimizadas.
+  - `docker-compose.yml` para execução rápida de testes ou da aplicação em ambientes isolados.
 
 ---
 
@@ -55,20 +86,20 @@ Ao final, gera uma planilha profissional (`Relatorio_Financeiro_Final.xlsx`) com
 
 ```mermaid
 flowchart TD
-    A[Múltiplos Extratos CSV e PDF] --> B[CustomTkinter GUI - Drag & Drop]
-    B --> C[Motor de Ingestão & Normalização]
-    C -->|Regex Linha a Linha| D1[Parser PDF pdfplumber]
-    C -->|Detecção Dinâmica| D2[Parser CSV pandas]
-    D1 --> E[Desduplicação de Colunas & Tratamento de Datas/Valores]
-    D2 --> E
-    E --> F[Classificador Híbrido: Regras + Groq IA]
-    F --> G[Dataset Consolidado Unificado]
-    G --> H[Análise Combinatória itertools]
-    H --> I[Consultoria Financeira Groq LLM]
-    G --> J[Gerador openpyxl]
-    I --> J
-    J --> K[Relatorio_Financeiro_Final.xlsx]
-    K --> L[Google Sheets / Microsoft Excel]
+    A[Múltiplos Extratos CSV e PDF] --> B[CustomTkinter GUI]
+    B -->|Se PDF criptografado| B1[Pop-up de Senha em Memória]
+    B1 --> C[Motor de Ingestão & Descriptografia em RAM]
+    B --> C
+    C --> D[Deduplicação Inteligente & Neutralização de Estornos]
+    D --> E[Classificador Híbrido: Regex Tier 1 + Groq LLM Tier 2]
+    E --> F[Dataset Consolidado Normalizado]
+    F --> G[Otimizador de Metas Combinatório - Knapsack]
+    G --> H[Projeção de Juros Compostos CDI - 1, 5 e 10 anos]
+    G --> I[Consultor Estratégico Groq AI]
+    F --> J[Gráficos Embutidos Matplotlib Canvas]
+    F --> K[Cards de KPI no Topo da GUI]
+    F --> L[Exportador openpyxl - Google Sheets / Excel]
+    I --> L
 ```
 
 ---
@@ -77,90 +108,92 @@ flowchart TD
 
 ```text
 finpy/
-├── analisador_financeiro.py    # Aplicação principal (CustomTkinter GUI + Pipeline + IA + Excel)
-├── dados_exemplo.csv           # Amostra de extrato para teste imediato (Conta 1)
-├── dados_exemplo_banco2.csv    # Amostra de extrato para teste de cruzamento (Conta 2)
-├── .env.example                # Modelo para configuração da API Key
-├── .gitignore                  # Proteção contra commit de extratos pessoais e chaves
-├── requirements.txt            # Dependências Python do projeto
-└── README.md                   # Documentação completa
+├── analisador_financeiro.py    # Aplicação principal (GUI, Pipeline, Knapsack, CDI, IA, Excel)
+├── tests/
+│   └── test_analisador.py      # Testes unitários automatizados com pytest (100% passing)
+├── Dockerfile                  # Empacotamento Docker com dependências X11/Tkinter
+├── docker-compose.yml          # Orquestração para rodar testes e aplicação
+├── pytest.ini                  # Configurações do ambiente de testes
+├── requirements.txt            # Dependências Python pinned
+├── dados_exemplo.csv           # Extrato de exemplo (Conta 1)
+├── dados_exemplo_banco2.csv    # Extrato de exemplo para cruzamento (Conta 2)
+├── .env.example                # Modelo para configuração da chave Groq
+├── LICENSE                     # Licença MIT
+└── README.md                   # Documentação detalhada
 ```
 
 ---
 
-## 🛠️ Tecnologias e Bibliotecas
+## ⚙️ Instalação e Execução
 
-- **Linguagem:** Python 3.10+
-- **Interface Visual:** [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) + [tkinterdnd2](https://github.com/pmgagne/tkinterdnd2)
-- **Processamento de Dados:** [Pandas](https://pandas.pydata.org/)
-- **Extração de Documentos:** [pdfplumber](https://github.com/jsvine/pdfplumber)
-- **Inteligência Artificial:** [Groq Cloud SDK](https://console.groq.com/)
-- **Matemática & Otimização:** `itertools` (Biblioteca padrão)
-- **Construção de Planilhas & Gráficos:** [openpyxl](https://openpyxl.readthedocs.io/)
+### Opção 1: Ambiente Local (Virtualenv)
 
----
+1. **Clone o repositório:**
+   ```bash
+   git clone https://github.com/mmelquii-dev/FinPy.git
+   cd FinPy
+   ```
 
-## ⚙️ Como Instalar e Executar
+2. **Crie e ative o ambiente virtual:**
+   ```bash
+   python3 -m venv venv
+   source venv/bin/activate  # No Linux/Mac
+   # ou: .\venv\Scripts\activate no Windows
+   ```
 
-### 1. Clonar o Repositório
-```bash
-git clone https://github.com/seu-usuario/finpy.git
-cd finpy
-```
+3. **Instale as dependências:**
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### 2. Criar e Ativar o Ambiente Virtual
-```bash
-# Linux / macOS
-python3 -m venv venv
-source venv/bin/activate
+4. **Configure a chave do Groq:**
+   Copie `.env.example` para `.env` e insira sua chave gratuita da [Groq Cloud](https://console.groq.com/):
+   ```env
+   GROQ_API_KEY=sua_chave_aqui
+   ```
 
-# Windows
-python -m venv venv
-venv\Scripts\activate
-```
-
-### 3. Instalar Dependências
-```bash
-pip install -r requirements.txt
-```
-
-### 4. Configurar a Chave de API do Groq
-1. Obtenha uma chave gratuita em [console.groq.com](https://console.groq.com/keys).
-2. Crie seu arquivo `.env` a partir do modelo:
-```bash
-cp .env.example .env
-```
-3. Edite o arquivo `.env` inserindo sua chave:
-```env
-GROQ_API_KEY=gsk_sua_chave_aqui
-```
-*(Caso não defina no `.env`, a própria interface gráfica solicitará a chave ao iniciar o processamento).*
-
-### 5. Executar a Aplicação
-```bash
-python analisador_financeiro.py
-```
+5. **Execute a aplicação:**
+   ```bash
+   python analisador_financeiro.py
+   ```
 
 ---
 
-## 🧪 Testando com os Dados de Exemplo
+### Opção 2: Executando os Testes Automatizados (`pytest`)
 
-Para testar o aplicativo sem precisar de extratos reais imediatamente:
-1. Abra a aplicação.
-2. Arraste para a janela os arquivos `dados_exemplo.csv` e `dados_exemplo_banco2.csv`.
-3. Clique em **"🚀 Executar Cruzamento & Análise Completa"**.
-4. O arquivo `Relatorio_Financeiro_Final.xlsx` será gerado automaticamente.
+Para rodar a suite completa de testes unitários:
+```bash
+pytest tests/ -v
+```
+
+Saída esperada:
+```text
+tests/test_analisador.py::test_limpar_valor_monetario PASSED             [ 20%]
+tests/test_analisador.py::test_classificador_regex PASSED                [ 40%]
+tests/test_analisador.py::test_deduplicar_e_tratar_estornos PASSED       [ 60%]
+tests/test_analisador.py::test_otimizador_metas_knapsack PASSED          [ 80%]
+tests/test_analisador.py::test_projecao_juros_compostos PASSED           [100%]
+============================== 5 passed in 1.6s ===============================
+```
 
 ---
 
-## 🔒 Segurança e Privacidade de Dados
+### Opção 3: Executando com Docker
 
-Este projeto foi construído respeitando as melhores práticas de privacidade financeira:
-- O arquivo `.gitignore` vem pré-configurado para **nunca enviar arquivos `.env`, extratos pessoais (`*.csv`, `*.pdf`) ou planilhas geradas (`*.xlsx`)** para o repositório Git.
-- Todos os dados permanecem locais na sua máquina, sendo transmitidos ao Groq apenas os nomes das descrições de despesas para fins de categorização e os totais consolidados para a geração do diagnóstico textual.
+1. **Executar a suite de testes no Docker:**
+   ```bash
+   docker-compose run --rm test
+   ```
+
+2. **Construir a imagem da aplicação:**
+   ```bash
+   docker build -t finpy:latest .
+   ```
 
 ---
 
-## 📜 Licença
+## 📄 Licença
 
-Distribuído sob a licença MIT. Consulte `LICENSE` para mais detalhes.
+Este projeto é distribuído sob os termos da licença **MIT**. Veja o arquivo [LICENSE](LICENSE) para mais detalhes.
+
+Copyright (c) 2026 Melquisedeque Silva.

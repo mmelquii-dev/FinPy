@@ -877,18 +877,24 @@ class AppGUI:
     def __init__(self, root):
         self.root = root
         self.root.title("FinPy • Analisador Financeiro Multibancos (AI & Data Science)")
-        self.root.geometry("860x840")
-        self.root.minsize(800, 750)
+        self.root.geometry("880x860")
+        self.root.minsize(750, 550)
 
         self.chave_groq = os.getenv("GROQ_API_KEY", "").strip()
         self.arquivos_selecionados = []
         self.mostrar_chave = False
+        self.tela_cheia = False
+        self.maximizado = False
 
-        # Container Principal
-        self.main_container = ctk.CTkFrame(root, corner_radius=0, fg_color="transparent")
-        self.main_container.pack(fill="both", expand=True, padx=20, pady=15)
+        # Container Principal Scrollável (permite rolar a tela inteira em qualquer resolução)
+        self.main_container = ctk.CTkScrollableFrame(
+            root,
+            corner_radius=0,
+            fg_color="transparent"
+        )
+        self.main_container.pack(fill="both", expand=True, padx=10, pady=8)
 
-        # 1. Header com Logo, Título e Seletor de Tema
+        # 1. Header com Logo, Título, Controles de Tela Cheia e Tema
         self._criar_header()
 
         # 2. Card de Configuração da API Key
@@ -897,7 +903,7 @@ class AppGUI:
         # 3. Zona de Upload Drag & Drop
         self._criar_zona_upload()
 
-        # 4. Lista de Arquivos Carregados (Scrollable Frame)
+        # 4. Lista de Arquivos Carregados
         self._criar_lista_arquivos()
 
         # 5. Barra de Ação & Progresso
@@ -906,6 +912,9 @@ class AppGUI:
 
         # 6. Tabview para Logs e Relatório IA
         self._criar_tabview_resultados()
+
+        # Configura atalhos de teclado e scroll universal
+        self._configurar_eventos_globais()
 
     def _criar_header(self):
         header = ctk.CTkFrame(self.main_container, fg_color="transparent")
@@ -930,7 +939,7 @@ class AppGUI:
         )
         lbl_sub.pack(anchor="w")
 
-        # Controles Direita: Status e Tema
+        # Controles Direita: Status, Tela Cheia e Tema
         ctrl_box = ctk.CTkFrame(header, fg_color="transparent")
         ctrl_box.pack(side="right")
 
@@ -942,15 +951,103 @@ class AppGUI:
         )
         self.lbl_status.pack(side="top", anchor="e", pady=(0, 2))
 
+        botoes_box = ctk.CTkFrame(ctrl_box, fg_color="transparent")
+        botoes_box.pack(side="top", anchor="e")
+
+        self.btn_maximizar = ctk.CTkButton(
+            botoes_box,
+            text="🗖 Maximizar",
+            width=90,
+            height=26,
+            font=ctk.CTkFont(size=11),
+            fg_color=("gray70", "gray25"),
+            hover_color=("gray60", "gray35"),
+            command=self.alternar_maximizar
+        )
+        self.btn_maximizar.pack(side="left", padx=(0, 4))
+
+        self.btn_tela_cheia = ctk.CTkButton(
+            botoes_box,
+            text="⛶ Tela Cheia",
+            width=95,
+            height=26,
+            font=ctk.CTkFont(size=11, weight="bold"),
+            command=self.alternar_tela_cheia
+        )
+        self.btn_tela_cheia.pack(side="left", padx=(0, 4))
+
         theme_menu = ctk.CTkOptionMenu(
-            ctrl_box,
+            botoes_box,
             values=["Dark", "Light", "System"],
             command=ctk.set_appearance_mode,
-            width=90,
+            width=85,
             height=26,
             font=ctk.CTkFont(size=11)
         )
-        theme_menu.pack(side="top", anchor="e")
+        theme_menu.pack(side="left")
+
+    def alternar_tela_cheia(self, event=None):
+        self.tela_cheia = not self.tela_cheia
+        try:
+            self.root.attributes('-fullscreen', self.tela_cheia)
+            if self.tela_cheia:
+                self.btn_tela_cheia.configure(text="🗗 Janela")
+            else:
+                self.btn_tela_cheia.configure(text="⛶ Tela Cheia")
+        except Exception:
+            pass
+
+    def sair_tela_cheia(self, event=None):
+        if self.tela_cheia:
+            self.tela_cheia = False
+            try:
+                self.root.attributes('-fullscreen', False)
+                self.btn_tela_cheia.configure(text="⛶ Tela Cheia")
+            except Exception:
+                pass
+
+    def alternar_maximizar(self, event=None):
+        self.maximizado = not self.maximizado
+        try:
+            if platform.system() == 'Windows':
+                self.root.state('zoomed' if self.maximizado else 'normal')
+            else:
+                self.root.attributes('-zoomed', self.maximizado)
+            if self.maximizado:
+                self.btn_maximizar.configure(text="🗗 Restaurar")
+            else:
+                self.btn_maximizar.configure(text="🗖 Maximizar")
+        except Exception:
+            pass
+
+    def _configurar_eventos_globais(self):
+        # Atalhos
+        self.root.bind("<F11>", self.alternar_tela_cheia)
+        self.root.bind("<Escape>", self.sair_tela_cheia)
+
+        # Scroll universal suave pelo mouse wheel em qualquer ponto da tela
+        def _scroll_suave(event):
+            widget_str = str(event.widget).lower()
+            if 'text' in widget_str:
+                return
+            try:
+                if platform.system() == 'Windows':
+                    self.main_container._parent_canvas.yview_scroll(-int(event.delta / 60), "units")
+                elif platform.system() == 'Darwin':
+                    self.main_container._parent_canvas.yview_scroll(-int(event.delta), "units")
+                else:
+                    if event.num == 4:
+                        self.main_container._parent_canvas.yview_scroll(-2, "units")
+                    elif event.num == 5:
+                        self.main_container._parent_canvas.yview_scroll(2, "units")
+            except Exception:
+                pass
+
+        if platform.system() == 'Linux':
+            self.root.bind_all("<Button-4>", _scroll_suave, add="+")
+            self.root.bind_all("<Button-5>", _scroll_suave, add="+")
+        else:
+            self.root.bind_all("<MouseWheel>", _scroll_suave, add="+")
 
     def _criar_card_api(self):
         card = ctk.CTkFrame(self.main_container, corner_radius=10, fg_color=("gray90", "gray17"))
@@ -1065,33 +1162,32 @@ class AppGUI:
         )
         btn_clear.pack(side="right")
 
-        self.scroll_arquivos = ctk.CTkScrollableFrame(
+        self.container_arquivos = ctk.CTkFrame(
             self.main_container,
-            height=100,
             corner_radius=8,
             fg_color=("gray90", "gray13")
         )
-        self.scroll_arquivos.pack(fill="x", pady=(0, 10))
+        self.container_arquivos.pack(fill="x", pady=(0, 10))
 
     def _atualizar_lista_arquivos_ui(self):
-        for widget in self.scroll_arquivos.winfo_children():
+        for widget in self.container_arquivos.winfo_children():
             widget.destroy()
 
         if not self.arquivos_selecionados:
             lbl_vazio = ctk.CTkLabel(
-                self.scroll_arquivos,
+                self.container_arquivos,
                 text="Nenhum extrato carregado. Arraste arquivos na caixa acima ou clique em 'Selecionar Arquivos'.",
                 font=ctk.CTkFont(size=12),
                 text_color="gray"
             )
-            lbl_vazio.pack(pady=18)
+            lbl_vazio.pack(pady=16)
             self.lbl_contador.configure(text="📁 Extratos para Cruzamento (0)", text_color="gray")
             self.btn_executar.configure(state="disabled")
             return
 
         for caminho in self.arquivos_selecionados:
-            card = ctk.CTkFrame(self.scroll_arquivos, corner_radius=6, fg_color=("gray85", "gray18"))
-            card.pack(fill="x", pady=2, padx=2)
+            card = ctk.CTkFrame(self.container_arquivos, corner_radius=6, fg_color=("gray85", "gray18"))
+            card.pack(fill="x", pady=2, padx=4)
 
             is_pdf = caminho.lower().endswith('.pdf')
             badge_txt = "PDF" if is_pdf else "CSV"
@@ -1161,8 +1257,8 @@ class AppGUI:
         self.progress_bar.set(0)
 
     def _criar_tabview_resultados(self):
-        self.tabview = ctk.CTkTabview(self.main_container, corner_radius=10)
-        self.tabview.pack(fill="both", expand=True)
+        self.tabview = ctk.CTkTabview(self.main_container, height=280, corner_radius=10)
+        self.tabview.pack(fill="x", pady=(0, 10))
 
         tab_log = self.tabview.add("📋 Logs do Pipeline")
         tab_ia = self.tabview.add("💡 Relatório da IA")
@@ -1171,6 +1267,7 @@ class AppGUI:
         # Tab 1: Logs
         self.txt_log = ctk.CTkTextbox(
             tab_log,
+            height=220,
             font=ctk.CTkFont(family="Consolas", size=11),
             text_color="#80FF80",
             fg_color=("#1a1a1a", "#0f0f0f"),
@@ -1181,6 +1278,7 @@ class AppGUI:
         # Tab 2: Relatório IA
         self.txt_relatorio = ctk.CTkTextbox(
             tab_ia,
+            height=220,
             font=ctk.CTkFont(size=12),
             corner_radius=6
         )
@@ -1190,30 +1288,30 @@ class AppGUI:
         self.frame_planilha = ctk.CTkFrame(tab_planilha, corner_radius=8, fg_color="transparent")
         self.frame_planilha.pack(fill="both", expand=True, padx=12, pady=12)
 
-        lbl_icon_p = ctk.CTkLabel(self.frame_planilha, text="📈", font=ctk.CTkFont(size=40))
-        lbl_icon_p.pack(pady=(10, 4))
+        lbl_icon_p = ctk.CTkLabel(self.frame_planilha, text="📈", font=ctk.CTkFont(size=36))
+        lbl_icon_p.pack(pady=(6, 2))
 
         self.lbl_p_titulo = ctk.CTkLabel(
             self.frame_planilha,
             text="Relatorio_Financeiro_Final.xlsx",
-            font=ctk.CTkFont(size=16, weight="bold")
+            font=ctk.CTkFont(size=15, weight="bold")
         )
         self.lbl_p_titulo.pack()
 
         self.lbl_p_desc = ctk.CTkLabel(
             self.frame_planilha,
-            text="A planilha unificada inclui Dashboards visuais, gráficos interativos e cruzamento de bancos.\nPronta para abrir no Google Sheets ou no Microsoft Excel.",
-            font=ctk.CTkFont(size=12),
+            text="Planilha consolidada com Dashboards visuais, gráficos interativos e cruzamento de bancos.\nCompatível nativamente com Google Sheets e Microsoft Excel.",
+            font=ctk.CTkFont(size=11),
             text_color="gray"
         )
-        self.lbl_p_desc.pack(pady=(4, 12))
+        self.lbl_p_desc.pack(pady=(2, 10))
 
         self.btn_abrir_planilha = ctk.CTkButton(
             self.frame_planilha,
             text="📂 Abrir Planilha no Computador",
             command=self._abrir_planilha,
-            width=240,
-            height=36,
+            width=230,
+            height=34,
             corner_radius=8,
             font=ctk.CTkFont(size=12, weight="bold"),
             state="disabled"
@@ -1363,4 +1461,5 @@ if __name__ == "__main__":
 
     app = AppGUI(janela_principal)
     janela_principal.mainloop()
+
 

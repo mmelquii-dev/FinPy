@@ -920,20 +920,29 @@ class AnalisadorFinanceiro:
         ws_dash.title = "Dashboard & Gráficos"
         ws_dash.views.sheetView[0].showGridLines = True
 
-        ws_dash["A1"] = "📊 DASHBOARD FINANCEIRO & CONTROLE DE GASTOS"
+        ws_dash["A1"] = "📊 DASHBOARD FINANCEIRO & CONTROLE DE GASTOS (MÉDIA MENSAL)"
         ws_dash["A1"].font = Font(name="Calibri", size=16, bold=True, color=cor_primaria)
 
-        # KPIs Gerais
+        # KPIs Gerais em Média Mensal (para controle financeiro realista e planejamento)
+        num_meses = max(1, df['Mes_Ano'].nunique())
         receitas_total = float(df[df['Valor'] > 0]['Valor'].sum())
         despesas_total = float(df[df['Valor'] < 0]['Valor'].abs().sum())
         saldo_total = receitas_total - despesas_total
 
-        ws_dash["A3"] = "Total Receitas"
-        ws_dash["A4"] = receitas_total
-        ws_dash["B3"] = "Total Despesas"
-        ws_dash["B4"] = despesas_total
-        ws_dash["C3"] = "Saldo Consolidado"
-        ws_dash["C4"] = saldo_total
+        receitas_media = receitas_total / num_meses
+        despesas_media = despesas_total / num_meses
+        saldo_medio = saldo_total / num_meses
+        poupanca_taxa = ((receitas_total - despesas_total) / receitas_total) if receitas_total > 0 else 0.0
+
+        # Cards de KPI com foco em Média Mensal
+        ws_dash["A3"] = "Receita Média / Mês"
+        ws_dash["A4"] = receitas_media
+        ws_dash["B3"] = "Despesa Média / Mês"
+        ws_dash["B4"] = despesas_media
+        ws_dash["C3"] = "Sobra Média / Mês"
+        ws_dash["C4"] = saldo_medio
+        ws_dash["D3"] = "Taxa Média de Poupança"
+        ws_dash["D4"] = poupanca_taxa
 
         for col_l in ["A", "B", "C"]:
             ws_dash[f"{col_l}3"].font = Font(name="Calibri", size=10, bold=True, color="595959")
@@ -944,57 +953,86 @@ class AnalisadorFinanceiro:
             ws_dash[f"{col_l}4"].alignment = Alignment(horizontal="center")
             ws_dash[f"{col_l}4"].fill = PatternFill(start_color=cor_cinza, fill_type="solid")
 
-        # Tabela 1: Despesas por Categoria para alimentar os gráficos
+        ws_dash["D3"].font = Font(name="Calibri", size=10, bold=True, color="595959")
+        ws_dash["D3"].alignment = Alignment(horizontal="center")
+        ws_dash["D3"].fill = PatternFill(start_color=cor_cinza, fill_type="solid")
+        ws_dash["D4"].font = Font(name="Calibri", size=13, bold=True, color=cor_primaria)
+        ws_dash["D4"].number_format = "0.0%"
+        ws_dash["D4"].alignment = Alignment(horizontal="center")
+        ws_dash["D4"].fill = PatternFill(start_color=cor_cinza, fill_type="solid")
+
+        # Texto informativo do período consolidado
+        periodo_txt = f"ℹ️ Análise Financeira Mensal calculada sobre {num_meses} mês(es) de histórico. Total consolidado no período: Receitas R$ {receitas_total:,.2f} | Despesas R$ {despesas_total:,.2f} | Saldo Acumulado R$ {saldo_total:,.2f}."
+        ws_dash["A5"] = periodo_txt
+        ws_dash["A5"].font = Font(name="Calibri", size=9, italic=True, color="595959")
+
+        # Tabela 1: Despesas Médias por Categoria para alimentar os gráficos
         despesas_df = df[df['Valor'] < 0].copy()
         despesas_df['Valor_Absoluto'] = despesas_df['Valor'].abs()
-        resumo_cat = despesas_df.groupby('Categoria')['Valor_Absoluto'].sum().sort_values(ascending=False).reset_index()
+        resumo_cat = despesas_df.groupby('Categoria')['Valor_Absoluto'].sum().reset_index()
+        resumo_cat['Media_Mensal'] = resumo_cat['Valor_Absoluto'] / num_meses
+        resumo_cat['Pct_Total'] = resumo_cat['Valor_Absoluto'] / (despesas_total if despesas_total > 0 else 1.0)
+        resumo_cat = resumo_cat.sort_values(by='Media_Mensal', ascending=False).reset_index(drop=True)
 
-        ws_dash["A6"] = "Categoria"
-        ws_dash["B6"] = "Total Gasto (R$)"
-        ws_dash["A6"].font = fonte_cabecalho
-        ws_dash["A6"].fill = fill_cabecalho
-        ws_dash["B6"].font = fonte_cabecalho
-        ws_dash["B6"].fill = fill_cabecalho
+        ws_dash["A7"] = "Categoria"
+        ws_dash["B7"] = "Média Mensal (R$)"
+        ws_dash["C7"] = "Total Período (R$)"
+        ws_dash["D7"] = "% dos Gastos"
+        for col_l in ["A", "B", "C", "D"]:
+            ws_dash[f"{col_l}7"].font = fonte_cabecalho
+            ws_dash[f"{col_l}7"].fill = fill_cabecalho
 
-        linha_atual = 7
+        linha_atual = 8
         for _, r in resumo_cat.iterrows():
             ws_dash.cell(row=linha_atual, column=1, value=str(r['Categoria']))
-            c_val = ws_dash.cell(row=linha_atual, column=2, value=float(r['Valor_Absoluto']))
-            c_val.number_format = "R$ #,##0.00"
+            c_med = ws_dash.cell(row=linha_atual, column=2, value=float(r['Media_Mensal']))
+            c_med.number_format = "R$ #,##0.00"
+            c_tot = ws_dash.cell(row=linha_atual, column=3, value=float(r['Valor_Absoluto']))
+            c_tot.number_format = "R$ #,##0.00"
+            c_pct = ws_dash.cell(row=linha_atual, column=4, value=float(r['Pct_Total']))
+            c_pct.number_format = "0.0%"
             linha_atual += 1
 
         total_cat_row = linha_atual
         if len(resumo_cat) > 0:
             ws_dash.cell(row=total_cat_row, column=1, value="TOTAL DESPESAS").font = Font(bold=True)
-            c_total = ws_dash.cell(row=total_cat_row, column=2, value=f"=SUM(B7:B{total_cat_row-1})")
-            c_total.font = Font(bold=True)
-            c_total.number_format = "R$ #,##0.00"
+            c_total_med = ws_dash.cell(row=total_cat_row, column=2, value=f"=SUM(B8:B{total_cat_row-1})")
+            c_total_med.font = Font(bold=True)
+            c_total_med.number_format = "R$ #,##0.00"
 
-            # Gráfico de Barras: Maiores Despesas
+            c_total_per = ws_dash.cell(row=total_cat_row, column=3, value=f"=SUM(C8:C{total_cat_row-1})")
+            c_total_per.font = Font(bold=True)
+            c_total_per.number_format = "R$ #,##0.00"
+
+            c_total_pct = ws_dash.cell(row=total_cat_row, column=4, value=f"=SUM(D8:D{total_cat_row-1})")
+            c_total_pct.font = Font(bold=True)
+            c_total_pct.number_format = "0.0%"
+
+            # Gráfico de Barras: Maiores Despesas Médias Mensais (aponta para Col B = Média Mensal)
             chart_bar = BarChart()
             chart_bar.type = "col"
             chart_bar.style = 10
-            chart_bar.title = "Maiores Despesas por Categoria (R$)"
-            chart_bar.y_axis.title = "Total (R$)"
+            chart_bar.title = "Maiores Despesas por Categoria (Média Mensal R$)"
+            chart_bar.y_axis.title = "Média Mensal (R$)"
             chart_bar.x_axis.title = "Categoria"
             chart_bar.width = 17
             chart_bar.height = 11
             chart_bar.legend = None
 
-            data_ref = Reference(ws_dash, min_col=2, min_row=6, max_row=total_cat_row-1)
-            cats_ref = Reference(ws_dash, min_col=1, min_row=7, max_row=total_cat_row-1)
+            data_ref = Reference(ws_dash, min_col=2, min_row=7, max_row=total_cat_row-1)
+            cats_ref = Reference(ws_dash, min_col=1, min_row=8, max_row=total_cat_row-1)
             chart_bar.add_data(data_ref, titles_from_data=True)
             chart_bar.set_categories(cats_ref)
-            ws_dash.add_chart(chart_bar, "D3")
+            ws_dash.add_chart(chart_bar, "F3")
 
-            # Gráfico de Pizza: Distribuição Percentual
+            # Gráfico de Pizza: Distribuição Percentual de Gastos
             chart_pie = PieChart()
             chart_pie.title = "Distribuição Percentual de Gastos"
             chart_pie.width = 15
             chart_pie.height = 11
             chart_pie.add_data(data_ref, titles_from_data=True)
             chart_pie.set_categories(cats_ref)
-            ws_dash.add_chart(chart_pie, "M3")
+            ws_dash.add_chart(chart_pie, "O3")
 
         proxima_linha = total_cat_row + 3
 
@@ -1003,29 +1041,36 @@ class AnalisadorFinanceiro:
             resumo_banco = df.groupby(['Banco', 'Tipo'])['Valor'].sum().unstack(fill_value=0).reset_index()
             if 'Receita' not in resumo_banco: resumo_banco['Receita'] = 0.0
             if 'Despesa' not in resumo_banco: resumo_banco['Despesa'] = 0.0
-            resumo_banco['Despesa'] = resumo_banco['Despesa'].abs()
+            resumo_banco['Despesa_Total'] = resumo_banco['Despesa'].abs()
+            resumo_banco['Receita_Total'] = resumo_banco['Receita']
+            resumo_banco['Receita_Media'] = resumo_banco['Receita_Total'] / num_meses
+            resumo_banco['Despesa_Media'] = resumo_banco['Despesa_Total'] / num_meses
 
             ws_dash.cell(row=proxima_linha, column=1, value="Banco / Conta").font = fonte_cabecalho
             ws_dash.cell(row=proxima_linha, column=1).fill = fill_cabecalho
-            ws_dash.cell(row=proxima_linha, column=2, value="Receitas").font = fonte_cabecalho
+            ws_dash.cell(row=proxima_linha, column=2, value="Receita Média/Mês").font = fonte_cabecalho
             ws_dash.cell(row=proxima_linha, column=2).fill = fill_cabecalho
-            ws_dash.cell(row=proxima_linha, column=3, value="Despesas").font = fonte_cabecalho
+            ws_dash.cell(row=proxima_linha, column=3, value="Despesa Média/Mês").font = fonte_cabecalho
             ws_dash.cell(row=proxima_linha, column=3).fill = fill_cabecalho
+            ws_dash.cell(row=proxima_linha, column=4, value="Saldo Total").font = fonte_cabecalho
+            ws_dash.cell(row=proxima_linha, column=4).fill = fill_cabecalho
 
             curr_b_row = proxima_linha + 1
             for _, br in resumo_banco.iterrows():
                 ws_dash.cell(row=curr_b_row, column=1, value=str(br['Banco']))
-                c_rec = ws_dash.cell(row=curr_b_row, column=2, value=float(br.get('Receita', 0)))
-                c_rec.number_format = "R$ #,##0.00"
-                c_desp = ws_dash.cell(row=curr_b_row, column=3, value=float(br.get('Despesa', 0)))
-                c_desp.number_format = "R$ #,##0.00"
+                c_rec_m = ws_dash.cell(row=curr_b_row, column=2, value=float(br.get('Receita_Media', 0)))
+                c_rec_m.number_format = "R$ #,##0.00"
+                c_desp_m = ws_dash.cell(row=curr_b_row, column=3, value=float(br.get('Despesa_Media', 0)))
+                c_desp_m.number_format = "R$ #,##0.00"
+                c_tot_b = ws_dash.cell(row=curr_b_row, column=4, value=float(br.get('Receita_Total', 0) - br.get('Despesa_Total', 0)))
+                c_tot_b.number_format = "R$ #,##0.00"
                 curr_b_row += 1
 
             chart_banco = BarChart()
             chart_banco.type = "col"
             chart_banco.style = 12
-            chart_banco.title = "Cruzamento de Contas: Receitas vs Despesas por Banco"
-            chart_banco.y_axis.title = "Valor (R$)"
+            chart_banco.title = "Cruzamento de Contas: Médias Mensais por Banco (R$)"
+            chart_banco.y_axis.title = "Média Mensal (R$)"
             chart_banco.x_axis.title = "Banco / Conta"
             chart_banco.width = 17
             chart_banco.height = 11
@@ -1034,7 +1079,7 @@ class AnalisadorFinanceiro:
             b_cats = Reference(ws_dash, min_col=1, min_row=proxima_linha+1, max_row=curr_b_row-1)
             chart_banco.add_data(b_data, titles_from_data=True)
             chart_banco.set_categories(b_cats)
-            ws_dash.add_chart(chart_banco, f"D{proxima_linha}")
+            ws_dash.add_chart(chart_banco, f"F{proxima_linha}")
 
             proxima_linha = curr_b_row + 2
 
@@ -1075,8 +1120,9 @@ class AnalisadorFinanceiro:
             ws_dash.add_chart(chart_mensal, f"M{proxima_linha if df['Banco'].nunique() > 1 else total_cat_row + 3}")
 
         ws_dash.column_dimensions["A"].width = 24
-        ws_dash.column_dimensions["B"].width = 20
-        ws_dash.column_dimensions["C"].width = 20
+        ws_dash.column_dimensions["B"].width = 22
+        ws_dash.column_dimensions["C"].width = 22
+        ws_dash.column_dimensions["D"].width = 20
 
         # -------------------------------------------------------------
         # ABA 2: Transações Consolidadas
@@ -1113,22 +1159,30 @@ class AnalisadorFinanceiro:
         ws_resumo.views.sheetView[0].showGridLines = True
 
         resumo_geral = df.groupby(['Categoria', 'Tipo'])['Valor'].sum().reset_index()
+        resumo_geral['Valor_Absoluto'] = resumo_geral['Valor'].abs()
+        resumo_geral['Media_Mensal'] = resumo_geral['Valor_Absoluto'] / num_meses
+
         ws_resumo.cell(row=1, column=1, value="Categoria").font = fonte_cabecalho
         ws_resumo.cell(row=1, column=1).fill = fill_cabecalho
         ws_resumo.cell(row=1, column=2, value="Tipo").font = fonte_cabecalho
         ws_resumo.cell(row=1, column=2).fill = fill_cabecalho
-        ws_resumo.cell(row=1, column=3, value="Total (R$)").font = fonte_cabecalho
+        ws_resumo.cell(row=1, column=3, value="Média Mensal (R$)").font = fonte_cabecalho
         ws_resumo.cell(row=1, column=3).fill = fill_cabecalho
+        ws_resumo.cell(row=1, column=4, value="Total Período (R$)").font = fonte_cabecalho
+        ws_resumo.cell(row=1, column=4).fill = fill_cabecalho
 
         for r_idx, (_, r) in enumerate(resumo_geral.iterrows(), 2):
             ws_resumo.cell(row=r_idx, column=1, value=str(r['Categoria']))
             ws_resumo.cell(row=r_idx, column=2, value=str(r['Tipo']))
-            c = ws_resumo.cell(row=r_idx, column=3, value=float(r['Valor']))
-            c.number_format = "R$ #,##0.00"
+            c_med = ws_resumo.cell(row=r_idx, column=3, value=float(r['Media_Mensal']))
+            c_med.number_format = "R$ #,##0.00"
+            c_tot = ws_resumo.cell(row=r_idx, column=4, value=float(r['Valor_Absoluto']))
+            c_tot.number_format = "R$ #,##0.00"
 
         ws_resumo.column_dimensions["A"].width = 24
         ws_resumo.column_dimensions["B"].width = 16
-        ws_resumo.column_dimensions["C"].width = 20
+        ws_resumo.column_dimensions["C"].width = 22
+        ws_resumo.column_dimensions["D"].width = 22
 
         # -------------------------------------------------------------
         # ABA 4: Insights e Recomendações IA
@@ -1284,10 +1338,10 @@ class AppGUI:
             kpi_container.grid_columnconfigure(i, weight=1)
 
         cards_data = [
-            ("entradas", "💰 Total Entradas", "R$ --", "#2EA043", "Receitas consolidadas"),
-            ("saidas", "💸 Total Saídas", "R$ --", "#F85149", "Despesas do período"),
+            ("entradas", "💰 Receita Média/Mês", "R$ --", "#2EA043", "Média mensal de receitas"),
+            ("saidas", "💸 Despesa Média/Mês", "R$ --", "#F85149", "Média mensal de despesas"),
             ("poupanca", "📈 Taxa Poupança", "--%", "#388BFD", "Sobra líquida / Entradas"),
-            ("ralo", "🚨 Maior Ralo", "--", "#E5A93C", "Gargalo principal")
+            ("ralo", "🚨 Maior Ralo Mensal", "--", "#E5A93C", "Gargalo médio mensal")
         ]
 
         for col, (chave, titulo, val_padrao, cor_val, sub) in enumerate(cards_data):
@@ -1592,23 +1646,27 @@ class AppGUI:
         self.btn_abrir_planilha.pack()
 
     def _atualizar_kpis(self, df):
-        """Calcula e atualiza os valores dinâmicos dos cards de KPI no topo."""
+        """Calcula e atualiza os valores dinâmicos dos cards de KPI no topo em formato de Média Mensal."""
         try:
-            entradas = float(df[df['Valor'] > 0]['Valor'].sum())
-            saidas = float(df[df['Valor'] < 0]['Valor'].abs().sum())
-            poupanca_pct = ((entradas - saidas) / entradas * 100) if entradas > 0 else 0.0
+            num_meses = max(1, df['Mes_Ano'].nunique())
+            entradas_total = float(df[df['Valor'] > 0]['Valor'].sum())
+            saidas_total = float(df[df['Valor'] < 0]['Valor'].abs().sum())
+
+            entradas_media = entradas_total / num_meses
+            saidas_media = saidas_total / num_meses
+            poupanca_pct = ((entradas_total - saidas_total) / entradas_total * 100) if entradas_total > 0 else 0.0
 
             despesas = df[df['Valor'] < 0]
             if not despesas.empty:
                 gastos_cat = despesas.groupby('Categoria')['Valor'].sum().abs()
                 maior_cat = str(gastos_cat.idxmax())
-                val_maior = float(gastos_cat.max())
-                texto_ralo = f"{maior_cat} (R$ {val_maior:,.0f})"
+                val_maior_media = float(gastos_cat.max()) / num_meses
+                texto_ralo = f"{maior_cat} (R$ {val_maior_media:,.0f}/mês)"
             else:
                 texto_ralo = "Nenhum"
 
-            self.kpi_labels['entradas'].configure(text=f"R$ {entradas:,.2f}")
-            self.kpi_labels['saidas'].configure(text=f"R$ {saidas:,.2f}")
+            self.kpi_labels['entradas'].configure(text=f"R$ {entradas_media:,.2f}/mês")
+            self.kpi_labels['saidas'].configure(text=f"R$ {saidas_media:,.2f}/mês")
             self.kpi_labels['poupanca'].configure(text=f"{poupanca_pct:.1f}%")
             self.kpi_labels['ralo'].configure(text=texto_ralo)
         except Exception as e:

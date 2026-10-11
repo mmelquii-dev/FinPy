@@ -1,0 +1,36 @@
+# Ambientes Virtuais Python
+venv/
+.venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Caches e arquivos compilados
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.pytest_cache/
+
+# Variáveis de ambiente e credenciais (NUNCA SUBIR AO GITHUB)
+.env
+.env.local
+*.env
+
+# Extratos bancários reais e relatórios gerados (Privacidade financeira)
+*.xlsx
+*.xls
+*Extrato*.csv
+*extrato*.csv
+*Extrato*.pdf
+*extrato*.pdf
+saida_para_bi*.csv
+
+# Editores e IDEs
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+.DS_Store
+Thumbs.db

@@ -10,7 +10,10 @@ from openpyxl.chart import BarChart, PieChart, Reference
 from openpyxl.styles import Font, PatternFill, Alignment
 from openpyxl.utils import get_column_letter
 import tkinter as tk
-from tkinter import filedialog, messagebox, scrolledtext, simpledialog
+import platform
+import subprocess
+import customtkinter as ctk
+from tkinter import filedialog, messagebox
 from groq import Groq
 from dotenv import load_dotenv
 
@@ -25,6 +28,9 @@ try:
     TEM_PDF = True
 except Exception:
     TEM_PDF = False
+
+ctk.set_appearance_mode("Dark")
+ctk.set_default_color_theme("blue")
 
 # Carrega as variáveis de ambiente
 load_dotenv()
@@ -870,34 +876,163 @@ class AnalisadorFinanceiro:
 class AppGUI:
     def __init__(self, root):
         self.root = root
-        self.root.title("Analisador Financeiro Multibancos (AI & Data Science)")
-        self.root.geometry("740x700")
-        self.root.configure(padx=20, pady=15, bg="#F4F6F9")
+        self.root.title("FinPy • Analisador Financeiro Multibancos (AI & Data Science)")
+        self.root.geometry("860x840")
+        self.root.minsize(800, 750)
 
         self.chave_groq = os.getenv("GROQ_API_KEY", "").strip()
         self.arquivos_selecionados = []
+        self.mostrar_chave = False
 
-        # --- Cabeçalho ---
-        header_frame = tk.Frame(root, bg="#F4F6F9")
-        header_frame.pack(fill=tk.X, pady=(0, 10))
+        # Container Principal
+        self.main_container = ctk.CTkFrame(root, corner_radius=0, fg_color="transparent")
+        self.main_container.pack(fill="both", expand=True, padx=20, pady=15)
 
-        tk.Label(header_frame, text="📊 Pipeline de Cruzamento de Extratos Bancários", font=("Arial", 16, "bold"), bg="#F4F6F9", fg="#1F4E79").pack(anchor="w")
-        tk.Label(header_frame, text="Importe múltiplos extratos (CSV e PDF) de diferentes bancos para análise e cruzamento.", font=("Arial", 10), bg="#F4F6F9", fg="#6C757D").pack(anchor="w")
+        # 1. Header com Logo, Título e Seletor de Tema
+        self._criar_header()
 
-        # --- Área de Drag & Drop ---
-        self.drop_frame = tk.Frame(root, bg="#FFFFFF", bd=2, relief="groove", padx=15, pady=15)
-        self.drop_frame.pack(fill=tk.X, pady=(0, 8))
+        # 2. Card de Configuração da API Key
+        self._criar_card_api()
 
-        lbl_icon = tk.Label(self.drop_frame, text="📥", font=("Arial", 26), bg="#FFFFFF")
+        # 3. Zona de Upload Drag & Drop
+        self._criar_zona_upload()
+
+        # 4. Lista de Arquivos Carregados (Scrollable Frame)
+        self._criar_lista_arquivos()
+
+        # 5. Barra de Ação & Progresso
+        self._criar_barra_execucao()
+        self._atualizar_lista_arquivos_ui()
+
+        # 6. Tabview para Logs e Relatório IA
+        self._criar_tabview_resultados()
+
+    def _criar_header(self):
+        header = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        header.pack(fill="x", pady=(0, 10))
+
+        # Título e Subtítulo
+        title_box = ctk.CTkFrame(header, fg_color="transparent")
+        title_box.pack(side="left")
+
+        lbl_title = ctk.CTkLabel(
+            title_box,
+            text="📊 FinPy • Analisador Multibancos",
+            font=ctk.CTkFont(size=20, weight="bold")
+        )
+        lbl_title.pack(anchor="w")
+
+        lbl_sub = ctk.CTkLabel(
+            title_box,
+            text="Cruzamento de Extratos Bancários • Análise Combinatória • Groq AI",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        lbl_sub.pack(anchor="w")
+
+        # Controles Direita: Status e Tema
+        ctrl_box = ctk.CTkFrame(header, fg_color="transparent")
+        ctrl_box.pack(side="right")
+
+        self.lbl_status = ctk.CTkLabel(
+            ctrl_box,
+            text="● Sistema Pronto",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#2EA043"
+        )
+        self.lbl_status.pack(side="top", anchor="e", pady=(0, 2))
+
+        theme_menu = ctk.CTkOptionMenu(
+            ctrl_box,
+            values=["Dark", "Light", "System"],
+            command=ctk.set_appearance_mode,
+            width=90,
+            height=26,
+            font=ctk.CTkFont(size=11)
+        )
+        theme_menu.pack(side="top", anchor="e")
+
+    def _criar_card_api(self):
+        card = ctk.CTkFrame(self.main_container, corner_radius=10, fg_color=("gray90", "gray17"))
+        card.pack(fill="x", pady=(0, 10), padx=2, ipady=4)
+
+        lbl_key = ctk.CTkLabel(card, text="🔑 Groq API Key:", font=ctk.CTkFont(size=12, weight="bold"))
+        lbl_key.pack(side="left", padx=(12, 8))
+
+        self.entry_chave = ctk.CTkEntry(
+            card,
+            placeholder_text="gsk_... (opcional se já definida no .env)",
+            show="*",
+            height=30
+        )
+        self.entry_chave.pack(side="left", fill="x", expand=True, padx=(0, 6))
+        if self.chave_groq:
+            self.entry_chave.insert(0, self.chave_groq)
+
+        self.btn_eye = ctk.CTkButton(
+            card,
+            text="👁️",
+            width=32,
+            height=30,
+            fg_color=("gray75", "gray25"),
+            hover_color=("gray65", "gray35"),
+            command=self._alternar_visibilidade_chave
+        )
+        self.btn_eye.pack(side="left", padx=(0, 10))
+
+        status_txt = "Configurada no .env" if self.chave_groq else "Insira sua chave"
+        status_color = "#2EA043" if self.chave_groq else "#E5A93C"
+        self.lbl_key_status = ctk.CTkLabel(
+            card,
+            text=status_txt,
+            font=ctk.CTkFont(size=11),
+            text_color=status_color
+        )
+        self.lbl_key_status.pack(side="right", padx=(0, 12))
+
+    def _alternar_visibilidade_chave(self):
+        self.mostrar_chave = not self.mostrar_chave
+        self.entry_chave.configure(show="" if self.mostrar_chave else "*")
+
+    def _criar_zona_upload(self):
+        self.drop_frame = ctk.CTkFrame(
+            self.main_container,
+            corner_radius=12,
+            border_width=2,
+            border_color="#1f538d",
+            fg_color=("gray95", "gray15")
+        )
+        self.drop_frame.pack(fill="x", pady=(0, 10), padx=2, ipady=12)
+
+        lbl_icon = ctk.CTkLabel(self.drop_frame, text="📥", font=ctk.CTkFont(size=34))
         lbl_icon.pack()
 
-        lbl_drop = tk.Label(self.drop_frame, text="Arraste e solte seus extratos aqui (CSV ou PDF)", font=("Arial", 12, "bold"), bg="#FFFFFF", fg="#1F4E79")
+        lbl_drop = ctk.CTkLabel(
+            self.drop_frame,
+            text="Arraste e solte seus extratos aqui (CSV ou PDF)",
+            font=ctk.CTkFont(size=15, weight="bold")
+        )
         lbl_drop.pack(pady=(2, 2))
 
-        lbl_sub = tk.Label(self.drop_frame, text="Suporta múltiplos extratos de bancos brasileiros (Nubank, Inter, Itaú, BB, etc.)", font=("Arial", 9), bg="#FFFFFF", fg="#6C757D")
-        lbl_sub.pack()
+        lbl_sub = ctk.CTkLabel(
+            self.drop_frame,
+            text="Suporta múltiplos extratos: Banco Inter, C6 Bank, Nubank, Itaú, Bradesco, BB, Caixa, etc.",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        lbl_sub.pack(pady=(0, 8))
 
-        # Ativa drag and drop se disponível no sistema
+        btn_browse = ctk.CTkButton(
+            self.drop_frame,
+            text="📂 Selecionar Arquivos...",
+            command=self.selecionar_arquivos,
+            width=200,
+            height=32,
+            corner_radius=8,
+            font=ctk.CTkFont(size=12, weight="bold")
+        )
+        btn_browse.pack()
+
         if TEM_DND:
             try:
                 self.drop_frame.drop_target_register(DND_FILES)
@@ -907,50 +1042,199 @@ class AppGUI:
             except Exception:
                 pass
 
-        # --- Barra de Ações de Arquivos ---
-        bar_frame = tk.Frame(root, bg="#F4F6F9")
-        bar_frame.pack(fill=tk.X, pady=(0, 6))
+    def _criar_lista_arquivos(self):
+        bar_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
+        bar_frame.pack(fill="x", pady=(0, 4))
 
-        btn_add = tk.Button(bar_frame, text="📂 Adicionar Arquivos...", command=self.selecionar_arquivos, font=("Arial", 10, "bold"), bg="#E9ECEF", padx=10)
-        btn_add.pack(side=tk.LEFT, padx=(0, 8))
-
-        btn_remove = tk.Button(bar_frame, text="🗑️ Remover Selecionado", command=self.remover_arquivo, font=("Arial", 9), bg="#FFF0F0", padx=8)
-        btn_remove.pack(side=tk.LEFT, padx=(0, 8))
-
-        btn_clear = tk.Button(bar_frame, text="🧹 Limpar Todos", command=self.limpar_arquivos, font=("Arial", 9), bg="#F8F9FA", padx=8)
-        btn_clear.pack(side=tk.LEFT)
-
-        self.lbl_contador = tk.Label(bar_frame, text="0 arquivo(s) carregado(s)", font=("Arial", 9, "bold"), bg="#F4F6F9", fg="#6C757D")
-        self.lbl_contador.pack(side=tk.RIGHT)
-
-        # --- Lista de Arquivos Carregados ---
-        list_container = tk.Frame(root, bg="#F4F6F9")
-        list_container.pack(fill=tk.X, pady=(0, 8))
-
-        self.listbox_arquivos = tk.Listbox(list_container, height=4, font=("Consolas", 10), selectmode=tk.SINGLE, bg="#FFFFFF")
-        scrollbar_list = tk.Scrollbar(list_container, orient="vertical", command=self.listbox_arquivos.yview)
-        self.listbox_arquivos.config(yscrollcommand=scrollbar_list.set)
-
-        self.listbox_arquivos.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        scrollbar_list.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # --- Botão Processar ---
-        self.btn_executar = tk.Button(
-            root,
-            text="🚀 Cruzar Dados e Gerar Análise Consolidada (Google Sheets / Excel)",
-            command=self.iniciar_processamento,
-            font=("Arial", 11, "bold"),
-            bg="#28A745",
-            fg="white",
-            state=tk.DISABLED,
-            pady=7
+        self.lbl_contador = ctk.CTkLabel(
+            bar_frame,
+            text="📁 Extratos para Cruzamento (0)",
+            font=ctk.CTkFont(size=12, weight="bold")
         )
-        self.btn_executar.pack(fill=tk.X, pady=(0, 8))
+        self.lbl_contador.pack(side="left")
 
-        # --- Caixa de Texto (Log e Relatório) ---
-        tk.Label(root, text="Logs do Sistema & Relatório da IA:", font=("Arial", 10, "bold"), bg="#F4F6F9", fg="#1F4E79").pack(anchor="w")
-        self.txt_log = scrolledtext.ScrolledText(root, width=80, height=10, font=("Consolas", 10), bg="#1e1e1e", fg="#00ff00")
-        self.txt_log.pack(fill=tk.BOTH, expand=True, pady=(3, 0))
+        btn_clear = ctk.CTkButton(
+            bar_frame,
+            text="🧹 Limpar Todos",
+            command=self.limpar_arquivos,
+            width=100,
+            height=26,
+            fg_color=("gray70", "gray25"),
+            hover_color=("gray60", "gray35"),
+            font=ctk.CTkFont(size=11)
+        )
+        btn_clear.pack(side="right")
+
+        self.scroll_arquivos = ctk.CTkScrollableFrame(
+            self.main_container,
+            height=100,
+            corner_radius=8,
+            fg_color=("gray90", "gray13")
+        )
+        self.scroll_arquivos.pack(fill="x", pady=(0, 10))
+
+    def _atualizar_lista_arquivos_ui(self):
+        for widget in self.scroll_arquivos.winfo_children():
+            widget.destroy()
+
+        if not self.arquivos_selecionados:
+            lbl_vazio = ctk.CTkLabel(
+                self.scroll_arquivos,
+                text="Nenhum extrato carregado. Arraste arquivos na caixa acima ou clique em 'Selecionar Arquivos'.",
+                font=ctk.CTkFont(size=12),
+                text_color="gray"
+            )
+            lbl_vazio.pack(pady=18)
+            self.lbl_contador.configure(text="📁 Extratos para Cruzamento (0)", text_color="gray")
+            self.btn_executar.configure(state="disabled")
+            return
+
+        for caminho in self.arquivos_selecionados:
+            card = ctk.CTkFrame(self.scroll_arquivos, corner_radius=6, fg_color=("gray85", "gray18"))
+            card.pack(fill="x", pady=2, padx=2)
+
+            is_pdf = caminho.lower().endswith('.pdf')
+            badge_txt = "PDF" if is_pdf else "CSV"
+            badge_color = "#6A1B9A" if is_pdf else "#0D47A1"
+
+            lbl_badge = ctk.CTkLabel(
+                card,
+                text=badge_txt,
+                fg_color=badge_color,
+                text_color="white",
+                corner_radius=4,
+                width=38,
+                font=ctk.CTkFont(size=10, weight="bold")
+            )
+            lbl_badge.pack(side="left", padx=(6, 8), pady=4)
+
+            nome_arq = os.path.basename(caminho)
+            lbl_nome = ctk.CTkLabel(
+                card,
+                text=nome_arq,
+                font=ctk.CTkFont(size=12, weight="bold")
+            )
+            lbl_nome.pack(side="left", padx=(0, 8))
+
+            try:
+                tam_kb = os.path.getsize(caminho) / 1024
+                tam_str = f"{tam_kb:.1f} KB" if tam_kb < 1024 else f"{tam_kb/1024:.2f} MB"
+            except Exception:
+                tam_str = ""
+
+            lbl_tam = ctk.CTkLabel(card, text=tam_str, font=ctk.CTkFont(size=11), text_color="gray")
+            lbl_tam.pack(side="left")
+
+            btn_del = ctk.CTkButton(
+                card,
+                text="✕",
+                width=24,
+                height=22,
+                corner_radius=4,
+                fg_color="transparent",
+                hover_color="#C62828",
+                text_color=("gray20", "gray80"),
+                command=lambda p=caminho: self.remover_arquivo(p)
+            )
+            btn_del.pack(side="right", padx=6)
+
+        qtd = len(self.arquivos_selecionados)
+        self.lbl_contador.configure(text=f"📁 Extratos para Cruzamento ({qtd})", text_color="#2EA043")
+        self.btn_executar.configure(state="normal")
+
+    def _criar_barra_execucao(self):
+        self.btn_executar = ctk.CTkButton(
+            self.main_container,
+            text="🚀 EXECUTAR CRUZAMENTO & ANÁLISE DE DADOS",
+            height=44,
+            corner_radius=8,
+            font=ctk.CTkFont(size=13, weight="bold"),
+            fg_color="#2EA043",
+            hover_color="#238636",
+            command=self.iniciar_processamento,
+            state="disabled"
+        )
+        self.btn_executar.pack(fill="x", pady=(0, 4))
+
+        self.progress_bar = ctk.CTkProgressBar(self.main_container, mode="indeterminate", height=4)
+        self.progress_bar.pack(fill="x", pady=(0, 8))
+        self.progress_bar.set(0)
+
+    def _criar_tabview_resultados(self):
+        self.tabview = ctk.CTkTabview(self.main_container, corner_radius=10)
+        self.tabview.pack(fill="both", expand=True)
+
+        tab_log = self.tabview.add("📋 Logs do Pipeline")
+        tab_ia = self.tabview.add("💡 Relatório da IA")
+        tab_planilha = self.tabview.add("📊 Planilha Gerada")
+
+        # Tab 1: Logs
+        self.txt_log = ctk.CTkTextbox(
+            tab_log,
+            font=ctk.CTkFont(family="Consolas", size=11),
+            text_color="#80FF80",
+            fg_color=("#1a1a1a", "#0f0f0f"),
+            corner_radius=6
+        )
+        self.txt_log.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # Tab 2: Relatório IA
+        self.txt_relatorio = ctk.CTkTextbox(
+            tab_ia,
+            font=ctk.CTkFont(size=12),
+            corner_radius=6
+        )
+        self.txt_relatorio.pack(fill="both", expand=True, padx=4, pady=4)
+
+        # Tab 3: Arquivo Gerado & Ações
+        self.frame_planilha = ctk.CTkFrame(tab_planilha, corner_radius=8, fg_color="transparent")
+        self.frame_planilha.pack(fill="both", expand=True, padx=12, pady=12)
+
+        lbl_icon_p = ctk.CTkLabel(self.frame_planilha, text="📈", font=ctk.CTkFont(size=40))
+        lbl_icon_p.pack(pady=(10, 4))
+
+        self.lbl_p_titulo = ctk.CTkLabel(
+            self.frame_planilha,
+            text="Relatorio_Financeiro_Final.xlsx",
+            font=ctk.CTkFont(size=16, weight="bold")
+        )
+        self.lbl_p_titulo.pack()
+
+        self.lbl_p_desc = ctk.CTkLabel(
+            self.frame_planilha,
+            text="A planilha unificada inclui Dashboards visuais, gráficos interativos e cruzamento de bancos.\nPronta para abrir no Google Sheets ou no Microsoft Excel.",
+            font=ctk.CTkFont(size=12),
+            text_color="gray"
+        )
+        self.lbl_p_desc.pack(pady=(4, 12))
+
+        self.btn_abrir_planilha = ctk.CTkButton(
+            self.frame_planilha,
+            text="📂 Abrir Planilha no Computador",
+            command=self._abrir_planilha,
+            width=240,
+            height=36,
+            corner_radius=8,
+            font=ctk.CTkFont(size=12, weight="bold"),
+            state="disabled"
+        )
+        self.btn_abrir_planilha.pack()
+
+    def _abrir_planilha(self):
+        caminho = os.path.abspath('Relatorio_Financeiro_Final.xlsx')
+        if not os.path.exists(caminho):
+            messagebox.showinfo("Aviso", "A planilha ainda não foi gerada. Execute a análise primeiro.")
+            return
+
+        try:
+            if platform.system() == 'Windows':
+                os.startfile(caminho)
+            elif platform.system() == 'Darwin':
+                subprocess.Popen(['open', caminho])
+            else:
+                subprocess.Popen(['xdg-open', caminho])
+        except Exception as e:
+            messagebox.showerror("Erro ao abrir", f"Não foi possível abrir o arquivo automaticamente:\n{e}")
 
     def ao_soltar_arquivos(self, event):
         dados = event.data
@@ -967,16 +1251,8 @@ class AppGUI:
             if os.path.isfile(c) and c.lower().endswith(('.csv', '.pdf', '.txt')):
                 if c not in self.arquivos_selecionados:
                     self.arquivos_selecionados.append(c)
-                    tipo = "PDF" if c.lower().endswith('.pdf') else "CSV"
-                    self.listbox_arquivos.insert(tk.END, f"📄 [{tipo}] {os.path.basename(c)}")
 
-        qtd = len(self.arquivos_selecionados)
-        if qtd > 0:
-            self.lbl_contador.config(text=f"📁 {qtd} extrato(s) pronto(s) para cruzamento", fg="#28A745")
-            self.btn_executar.config(state=tk.NORMAL)
-        else:
-            self.lbl_contador.config(text="0 arquivo(s) carregado(s)", fg="#6C757D")
-            self.btn_executar.config(state=tk.DISABLED)
+        self._atualizar_lista_arquivos_ui()
 
     def selecionar_arquivos(self):
         caminhos = filedialog.askopenfilenames(
@@ -991,48 +1267,43 @@ class AppGUI:
         if caminhos:
             self.adicionar_caminhos(caminhos)
 
-    def remover_arquivo(self):
-        selecao = self.listbox_arquivos.curselection()
-        if selecao:
-            idx = selecao[0]
-            self.listbox_arquivos.delete(idx)
-            del self.arquivos_selecionados[idx]
-            qtd = len(self.arquivos_selecionados)
-            if qtd > 0:
-                self.lbl_contador.config(text=f"📁 {qtd} extrato(s) pronto(s) para cruzamento", fg="#28A745")
-                self.btn_executar.config(state=tk.NORMAL)
-            else:
-                self.lbl_contador.config(text="0 arquivo(s) carregado(s)", fg="#6C757D")
-                self.btn_executar.config(state=tk.DISABLED)
+    def remover_arquivo(self, caminho):
+        if caminho in self.arquivos_selecionados:
+            self.arquivos_selecionados.remove(caminho)
+            self._atualizar_lista_arquivos_ui()
 
     def limpar_arquivos(self):
         self.arquivos_selecionados.clear()
-        self.listbox_arquivos.delete(0, tk.END)
-        self.lbl_contador.config(text="0 arquivo(s) carregado(s)", fg="#6C757D")
-        self.btn_executar.config(state=tk.DISABLED)
+        self._atualizar_lista_arquivos_ui()
 
     def log(self, mensagem):
-        self.txt_log.insert(tk.END, mensagem + "\n")
-        self.txt_log.see(tk.END)
+        self.txt_log.insert("end", mensagem + "\n")
+        self.txt_log.see("end")
         self.root.update_idletasks()
 
     def iniciar_processamento(self):
-        self.btn_executar.config(state=tk.DISABLED)
-        self.txt_log.delete(1.0, tk.END)
+        chave_input = self.entry_chave.get().strip()
+        if chave_input:
+            self.chave_groq = chave_input
+
+        if not self.chave_groq:
+            messagebox.showwarning("Chave Groq Ausente", "Por favor, insira sua Chave da API do Groq no campo superior antes de continuar.")
+            self.entry_chave.focus()
+            return
+
+        self.btn_executar.configure(state="disabled")
+        self.btn_abrir_planilha.configure(state="disabled")
+        self.txt_log.delete("1.0", "end")
+        self.txt_relatorio.delete("1.0", "end")
+        self.tabview.set("📋 Logs do Pipeline")
+        self.progress_bar.start()
+        self.lbl_status.configure(text="🟡 Processando...", text_color="#FFC107")
+
         thread = threading.Thread(target=self.processar_dados)
         thread.start()
 
     def processar_dados(self):
         try:
-            if not self.chave_groq:
-                chave = simpledialog.askstring("Chave da API Groq", "Insira sua API Key do Groq (ou defina no arquivo .env):", show="*")
-                if chave and chave.strip():
-                    self.chave_groq = chave.strip()
-                else:
-                    self.log("❌ ERRO: Nenhuma chave da API Groq fornecida. Operação cancelada.")
-                    self.btn_executar.config(state=tk.NORMAL)
-                    return
-
             total_arquivos = len(self.arquivos_selecionados)
             self.log(f"Inicializando motor de IA para cruzar {total_arquivos} extrato(s)...")
             analisador = AnalisadorFinanceiro(api_key=self.chave_groq)
@@ -1054,8 +1325,12 @@ class AppGUI:
 
             self.log("[5/5] ✨ CONCLUÍDO COM SUCESSO! ✨")
 
-            self.log("\n" + "="*50 + "\nRESUMO DO RELATÓRIO DA IA\n" + "="*50 + "\n")
-            self.log(relatorio)
+            # Atualiza Aba de Relatório IA
+            self.txt_relatorio.insert("end", relatorio)
+            self.tabview.set("💡 Relatório da IA")
+
+            self.lbl_status.configure(text="🟢 Concluído", text_color="#2EA043")
+            self.btn_abrir_planilha.configure(state="normal")
 
             messagebox.showinfo(
                 "Sucesso",
@@ -1069,14 +1344,23 @@ class AppGUI:
 
         except Exception as e:
             self.log(f"\n❌ ERRO FATAL: {str(e)}")
+            self.lbl_status.configure(text="🔴 Erro", text_color="#F44336")
             messagebox.showerror("Erro de Execução", f"Ocorreu um erro no pipeline de dados:\n\n{str(e)}")
         finally:
-            self.btn_executar.config(state=tk.NORMAL)
+            self.progress_bar.stop()
+            self.progress_bar.set(0)
+            self.btn_executar.configure(state="normal")
 
 if __name__ == "__main__":
     if TEM_DND:
-        janela_principal = TkinterDnD.Tk()
+        class AppWindow(ctk.CTk, TkinterDnD.DnDWrapper):
+            def __init__(self, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.TkdndVersion = TkinterDnD._require(self)
+        janela_principal = AppWindow()
     else:
-        janela_principal = tk.Tk()
+        janela_principal = ctk.CTk()
+
     app = AppGUI(janela_principal)
     janela_principal.mainloop()
+

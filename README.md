@@ -6,7 +6,7 @@
 ![Groq](https://img.shields.io/badge/Groq%20Cloud-LLM%20API-orange?logo=fastapi&logoColor=white)
 ![Pandas](https://img.shields.io/badge/Pandas-Data%20Science-150458?logo=pandas&logoColor=white)
 ![OpenPyXL](https://img.shields.io/badge/OpenPyXL-Excel%20%26%20Sheets-green)
-![Interface](https://img.shields.io/badge/Tkinter-Drag%20%26%20Drop-lightblue)
+![Interface](https://img.shields.io/badge/CustomTkinter-Dark%20Mode-blue)
 ![License](https://img.shields.io/badge/License-MIT-lightgrey)
 
 **Pipeline inteligente de Engenharia e Análise de Dados Financeiros com cruzamento multibancos, visão consolidada para Google Sheets/Excel e IA Generativa.**
@@ -29,7 +29,11 @@ Ao final, gera uma planilha profissional (`Relatorio_Financeiro_Final.xlsx`) com
 
 ## 🚀 Principais Funcionalidades
 
-- 📥 **Interface Gráfica com Drag & Drop:** Arraste e solte múltiplos arquivos simultaneamente na tela ou use o seletor de arquivos.
+- 🖥️ **Interface Gráfica Moderna (CustomTkinter):**
+  - Tema escuro/claro (*Dark/Light mode*) com cantos arredondados, visual contemporâneo e alternância em tempo real.
+  - Suporte completo a **Drag & Drop** para múltiplos arquivos simultâneos.
+  - Barra de progresso animada e abas separadas para logs em tempo real, relatório da IA e ações rápidas.
+  - Botão integrado para abrir a planilha diretamente no Excel/Sheets após o processamento.
 - 🏦 **Suporte Multibancos & Multiformatos:**
   - Extração inteligente de **CSVs** com detecção dinâmica de delimitadores e linhas de cabeçalho.
   - Parser de alta precisão para extratos em **PDF** (tratando quebras de linha, desconsiderando linhas de saldo diário e inferindo anos ausentes).
@@ -51,7 +55,7 @@ Ao final, gera uma planilha profissional (`Relatorio_Financeiro_Final.xlsx`) com
 
 ```mermaid
 flowchart TD
-    A[Múltiplos Extratos CSV e PDF] --> B[Tkinter GUI - Drag & Drop]
+    A[Múltiplos Extratos CSV e PDF] --> B[CustomTkinter GUI - Drag & Drop]
     B --> C[Motor de Ingestão & Normalização]
     C -->|Regex Linha a Linha| D1[Parser PDF pdfplumber]
     C -->|Detecção Dinâmica| D2[Parser CSV pandas]
@@ -73,7 +77,7 @@ flowchart TD
 
 ```text
 finpy/
-├── analisador_financeiro.py    # Aplicação principal (GUI + Pipeline de Dados + IA + Excel)
+├── analisador_financeiro.py    # Aplicação principal (CustomTkinter GUI + Pipeline + IA + Excel)
 ├── dados_exemplo.csv           # Amostra de extrato para teste imediato (Conta 1)
 ├── dados_exemplo_banco2.csv    # Amostra de extrato para teste de cruzamento (Conta 2)
 ├── .env.example                # Modelo para configuração da API Key
@@ -87,12 +91,12 @@ finpy/
 ## 🛠️ Tecnologias e Bibliotecas
 
 - **Linguagem:** Python 3.10+
+- **Interface Visual:** [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) + [tkinterdnd2](https://github.com/pmgagne/tkinterdnd2)
 - **Processamento de Dados:** [Pandas](https://pandas.pydata.org/)
 - **Extração de Documentos:** [pdfplumber](https://github.com/jsvine/pdfplumber)
 - **Inteligência Artificial:** [Groq Cloud SDK](https://console.groq.com/)
 - **Matemática & Otimização:** `itertools` (Biblioteca padrão)
 - **Construção de Planilhas & Gráficos:** [openpyxl](https://openpyxl.readthedocs.io/)
-- **Interface Visual:** [Tkinter](https://docs.python.org/3/library/tkinter.html) + [tkinterdnd2](https://github.com/pmgagne/tkinterdnd2)
 
 ---
 
